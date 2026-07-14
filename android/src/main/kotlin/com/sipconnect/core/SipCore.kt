@@ -478,7 +478,15 @@ class SipCore(private val appContext: Context) {
           calls.remove(id)
           recorders.remove(id)?.let { try { it.delete() } catch (_: Throwable) {} }
           renderers.remove(id)?.releaseSurface()
-          if (switchedCallId == id) switchedCallId = -1
+          if (switchedCallId == id) {
+            // Hand focus to a still-active call (if any) so the UI keeps a
+            // valid switchedCall; -1 when this was the last call.
+            switchedCallId = calls.keys.firstOrNull() ?: -1
+            if (switchedCallId != -1) {
+              val next = switchedCallId
+              onMain { modelListener?.onCallSwitched(next) }
+            }
+          }
           onMain {
             serviceListener?.onRingerState(false)
             serviceListener?.onCallTerminated(id, code)
@@ -586,6 +594,10 @@ class SipCore(private val appContext: Context) {
         val id = call.info.id
         calls[id] = call
         outId.value = id
+        // Match the previous engine: a newly created outgoing call becomes the
+        // active ("switched") call, so the Dart layer's switchedCall() resolves.
+        switchedCallId = id
+        onMain { modelListener?.onCallSwitched(id) }
         kErrorCodeEOK
       }
     } catch (t: Throwable) { lastErrText = t.message ?: "$t"; kErrorCode }

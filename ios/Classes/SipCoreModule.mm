@@ -125,6 +125,7 @@ struct Engine {
     int nextPlayerId = 1;
     int nextSubscrId = 1;
     int nextMsgId = 1;
+    int switchedCallId = -1;
 
     CoreCall* findCall(int id) {
         auto it = calls.find(id);
@@ -263,6 +264,15 @@ void CoreCall::onCallState(OnCallStateParam &prm) {
             [d onRingerState:NO];
             [d onCallTerminated:callId statusCode:code];
         });
+        // Hand focus to a still-active call (if any) so the UI keeps a valid
+        // switchedCall; -1 when this was the last call.
+        if (eng->switchedCallId == (int)callId) {
+            eng->switchedCallId = eng->calls.empty() ? -1 : eng->calls.begin()->first;
+            if (eng->switchedCallId != -1) {
+                NSInteger next = eng->switchedCallId;
+                emitOn(eng, ^(SCDelegate d) { [d onCallSwitched:next]; });
+            }
+        }
         CoreCall *self_ = this;
         dispatch_async(dispatch_get_main_queue(), ^{ delete self_; });
         break;
@@ -688,6 +698,11 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
         int callId = call->getId();
         _eng->calls[callId] = call;
         destData.myCallId = callId;
+        // Match the previous engine: a newly created outgoing call becomes the
+        // active ("switched") call, so the Dart layer's switchedCall() resolves.
+        _eng->switchedCallId = callId;
+        NSInteger cid = callId;
+        emitOn(_eng, ^(SCDelegate d) { [d onCallSwitched:cid]; });
         return kErrorCodeEOK;
     } catch (Error &err) {
         _eng->lastError = err.info();
@@ -1006,6 +1021,7 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
                 try { adm.getCaptureDevMedia().stopTransmit(*aud); } catch (Error &) {}
             }
         }
+        _eng->switchedCallId = callId;
         NSInteger cid = callId;
         emitOn(_eng, ^(SCDelegate d) { [d onCallSwitched:cid]; });
         return kErrorCodeEOK;
