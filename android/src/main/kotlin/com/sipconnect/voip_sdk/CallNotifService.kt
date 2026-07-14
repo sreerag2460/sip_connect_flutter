@@ -1,0 +1,627 @@
+@file:Suppress("SpellCheckingInspection", "ConstPropertyName")
+package com.sipconnect.voip_sdk
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Binder
+import android.os.Build
+import android.os.Bundle
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import androidx.core.app.Person
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+
+import com.siprix.ISiprixRinger
+import com.siprix.ISiprixServiceListener
+import com.siprix.SiprixCore
+import com.siprix.SiprixRinger
+
+
+open class CallNotifService : Service() {
+    private lateinit var _ringer: ISiprixRinger
+    private lateinit var _appResources: LabelResources
+    private lateinit var _context: Context
+
+    private var _actionReceiver: NotifActionReceiver? = null
+    private var _wakeLock: PowerManager.WakeLock? = null
+    private val _binder: IBinder = LocalBinder()
+
+    private var _isForegroundModeStartedByCall: Boolean = false //is foreground mode started by the call
+    private var _isForegroundModeStarted: Boolean = false       //is foreground mode started
+    private var _requestCode: Int = 1
+    private var _isBound: Boolean = false
+    private var _pendingMsgs : MutableList<Bundle> = mutableListOf()
+    private var _ongoingCalls : MutableSet<Int> = mutableSetOf()
+    private var _callsState: HashMap<String, Any?>? = null
+
+    inner class LocalBinder : Binder() {
+        val service: CallNotifService
+            get() =// Return this instance of LocalService so clients can call public methods.
+                this@CallNotifService
+    }
+
+    fun isDetached() : Boolean {
+        return this != _context
+    }
+
+    fun createInternal(context: Context) {
+        Log.d(TAG, "createInternal")
+        //Get core instance and set context (it can be service itself or externally provided)
+        core = createSipCore(context)
+        _context = context
+
+        core?.setServiceListener(CoreEventsListener(this))
+        _appResources = LabelResources(context)
+        _ringer = SiprixRinger(context)
+
+        createNotifChannel()
+    }
+
+    fun destroyInternal() {
+        Log.d(TAG, "destroyInternal $core")
+        stopForegroundMode()
+        notifMgr.cancelAll()
+
+        if(core != null) {
+            core?.setServiceListener(null)
+            core?.setModelListener(null)
+            core?.unInitialize()
+            core = null
+        }
+
+        if(_actionReceiver!=null)
+            _context.unregisterReceiver(_actionReceiver)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "onCreate")
+        createInternal(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d(TAG, "onDestroy")
+        destroyInternal()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d(TAG, "onTaskRemoved")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onBind(intent: Intent): IBinder? {
+        _isBound = true
+        return _binder
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        _isBound = false
+        return super.onUnbind(intent) // Or return true if you want to allow rebind
+    }
+
+    fun pendingMsgs() : MutableList<Bundle> { return _pendingMsgs }
+
+    private fun createNotifChannel() {
+        doCreateNotifChannel(kCallIncomingChannelId, _appResources.callIncomingChannelName, NotificationManager.IMPORTANCE_HIGH)
+        doCreateNotifChannel(kCallOngoingChannelId, _appResources.callOngoingChannelName, NotificationManager.IMPORTANCE_DEFAULT, noSound=true)
+        doCreateNotifChannel(kForegroundChannelId, _appResources.foregroundChannelName, NotificationManager.IMPORTANCE_LOW)
+        doCreateNotifChannel(kMsgChannelId, _appResources.msgChannelName, NotificationManager.IMPORTANCE_DEFAULT)
+    }
+
+    fun doCreateNotifChannel(id: String, name: String, importance: Int, noSound: Boolean=false) {
+        if (Build.VERSION.SDK_INT < 26) return
+
+        val channel = NotificationChannel(id, name, importance)
+        channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        if(noSound) channel.setSound(null, null)
+        notifMgr.createNotificationChannel(channel)
+    }
+
+    protected fun getIntentActivity(action: String?, bundle: Bundle): PendingIntent {
+        val activityIntent = _context.packageManager.getLaunchIntentForPackage(_context.packageName)
+        if(activityIntent==null) {
+            Log.e(TAG, "Can't get launch intent!")
+        }
+        activityIntent?.action = action
+
+        activityIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activityIntent?.putExtras(bundle)
+        return PendingIntent.getActivity(
+            _context, _requestCode++, activityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    protected fun getIntentService(action: String?, bundle: Bundle): PendingIntent {
+        if (_actionReceiver == null) {
+            _actionReceiver = NotifActionReceiver(this)
+
+            val filter = IntentFilter()
+            filter.addAction(kActionIncomingCallReject)
+            filter.addAction(kActionIncomingCallStopRinger)
+            filter.addAction(kActionOngoingCallHangup)
+
+            if (Build.VERSION.SDK_INT >= 34) {
+                _context.registerReceiver(_actionReceiver, filter, RECEIVER_NOT_EXPORTED)
+            } else {
+                _context.registerReceiver(_actionReceiver, filter)
+            }
+        }
+
+        val rcvrIntent = Intent(action)
+        rcvrIntent.putExtras(bundle)
+        rcvrIntent.setPackage(_context.packageName)
+        return PendingIntent.getBroadcast(
+            _context, _requestCode++, rcvrIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    fun handleIncomingCallIntent(intent: Intent) {
+        val callId = intent.extras?.getInt(kExtraCallId) ?: 0
+        if (callId <= 0) return
+
+        if (kActionIncomingCallReject == intent.action) {
+            core!!.callReject(callId)
+        }
+
+        if (kActionOngoingCall != intent.action) {
+            cancelNotification(callId)
+        }
+    }
+
+    fun handleOngoingCallIntent(intent: Intent) {
+        val callId = intent.extras?.getInt(kExtraCallId) ?: 0
+        if ((callId > 0) && (kActionOngoingCallHangup == intent.action)) {
+            core!!.callBye(callId)
+        }
+    }
+
+    fun removeOngoingNotification(callId: Int) {
+        cancelNotification(callId)
+        _ongoingCalls.remove(callId)
+        if(_ongoingCalls.isEmpty() && _isForegroundModeStartedByCall) {
+            stopForegroundMode()
+        }
+    }
+
+    protected fun cancelNotification(callId: Int) {
+        notifMgr.cancel(callId)
+    }
+
+    protected val appResources: LabelResources
+        get() = _appResources
+
+    protected val notifMgr: NotificationManager
+        get() = _context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+
+    fun buildCallBundle(callId: Int, accId: Int,
+                     withVideo: Boolean, hdrFrom: String?, hdrTo: String?) : Bundle{
+        val bundle = Bundle()
+        bundle.putInt(kExtraCallId, callId)
+        bundle.putInt(kExtraAccId, accId)
+        bundle.putBoolean(kExtraWithVideo, withVideo)
+        bundle.putString(kExtraHdrFrom, hdrFrom)
+        bundle.putString(kExtraHdrTo, hdrTo)
+        return bundle
+    }
+
+    fun buildMessageBundle(messageId: Int, accId: Int,
+                    hdrFrom: String?, body: String?) : Bundle{
+        val bundle = Bundle()
+        bundle.putInt(kExtraMsgId, messageId)
+        bundle.putInt(kExtraAccId, accId)
+        bundle.putString(kExtraHdrFrom, hdrFrom)
+        bundle.putString(kExtraBody, body)
+        return bundle
+    }
+
+    fun buildPerson(hdrFrom: String?) : Person{
+        return Person.Builder()
+            .setName(buildContentString(hdrFrom))
+            .setImportant(true)
+            .build()
+    }
+
+    open fun shouldShowNotificationWhenInForeground(): Boolean = false
+    open fun shouldShowOngoinCallNotif(): Boolean = true
+
+    open fun displayIncomingCallNotification(
+        callId: Int, accId: Int,
+        withVideo: Boolean, hdrFrom: String?, hdrTo: String?
+    ) {
+        Log.d(TAG, "displayIncomingCallNotif $callId")
+        val bundle = buildCallBundle(callId, accId, withVideo, hdrFrom, hdrTo)
+        val contentIntent = getIntentActivity(kActionIncomingCall, bundle)
+
+        val builder = NotificationCompat.Builder(_context, kCallIncomingChannelId)
+            .setSmallIcon(_appResources.iconId)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .setFullScreenIntent(contentIntent, true)
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            //.setDeleteIntent(getIntentService(kActionIncomingCallStopRinger, bundle))
+            .setStyle(NotificationCompat.CallStyle.forIncomingCall(
+                buildPerson(hdrFrom),
+                getIntentService(kActionIncomingCallReject, bundle),
+                getIntentActivity(kActionIncomingCallAccept, bundle)))
+
+        notifMgr.notify(callId, builder.build())
+    }
+
+    open fun displayOngoingCallNotification(
+        callId: Int, hdrFrom: String?, hdrTo: String?, withVideo: Boolean) {
+        Log.d(TAG, "displayOngoingCallNotification $callId")
+
+        val bundle = buildCallBundle(callId, 0, withVideo, hdrFrom, hdrTo)
+        val contentIntent = getIntentActivity(kActionOngoingCall, bundle)
+
+        val builder = NotificationCompat.Builder(_context, kCallOngoingChannelId)
+            .setSmallIcon(_appResources.iconId)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .setContentIntent(contentIntent)
+            .setFullScreenIntent(contentIntent, true)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(NotificationCompat.CallStyle.forOngoingCall(
+                buildPerson(hdrFrom),
+                getIntentService(kActionOngoingCallHangup, bundle)))
+
+        notifMgr.notify(callId, builder.build())
+
+        _ongoingCalls.add(callId)
+
+        startForegroundMode(hasOngoingCall = true)
+    }
+
+    open fun displayIncomingMessageNotification(
+        messageId: Int, accId: Int,
+        hdrFrom: String?, body: String?
+    ) {
+        Log.d(TAG, "displayIncomingMsgNotif $messageId")
+        val bundle = buildMessageBundle(messageId, accId, hdrFrom, body)
+        val contentIntent = getIntentActivity(kActionIncomingMsg, bundle)
+        val person = buildPerson(hdrFrom)
+
+        val builder = NotificationCompat.Builder(_context, kMsgChannelId)
+            .setSmallIcon(_appResources.iconId)
+            .setAutoCancel(true)
+            .setContentIntent(contentIntent)
+            .setFullScreenIntent(contentIntent, true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(NotificationCompat.MessagingStyle(person)
+                .addMessage(body, System.currentTimeMillis(), person)
+            )
+
+        notifMgr.notify(-messageId, builder.build())
+
+        if(!_isBound) _pendingMsgs.add(bundle)
+    }
+
+    fun stopForegroundMode() {
+        if(!_isForegroundModeStarted) return
+
+        releaseWakelock()
+        if (Build.VERSION.SDK_INT >= 33) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+
+        _isForegroundModeStartedByCall = false
+        _isForegroundModeStarted = false
+    }
+
+    fun startForegroundMode(hasOngoingCall: Boolean=false): Boolean {
+        if(_isForegroundModeStarted) return true
+        if(isDetached()) return false
+
+        if (ContextCompat.checkSelfPermission(_context, Manifest.permission.FOREGROUND_SERVICE)
+            != PackageManager.PERMISSION_GRANTED) return false
+
+        if(!isAppInForeground())
+            Log.w(TAG, "App is not in foreground, start service may fail")
+
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                startForeground(kForegroundId, buildForegroundNotif(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                )
+            } else {
+                startForeground(kForegroundId, buildForegroundNotif())
+            }
+        } catch (ex: Exception) {
+            core?.moduleWriteLog("Can't start ongoing notif: '${ex}")
+            return false
+        }
+        acquireWakelock()
+
+        _isForegroundModeStarted = true
+        if(hasOngoingCall) _isForegroundModeStartedByCall=true
+        return true
+    }
+
+    fun buildForegroundNotif(): Notification{
+        val contentIntent = getIntentActivity(kActionForeground, Bundle())
+        val builder: Notification.Builder = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(_context, kForegroundChannelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(_context)
+        }
+
+        builder.setSmallIcon(_appResources.iconId)
+            .setContentTitle(_appResources.appName)
+            .setContentText(_appResources.foregroundDescr)
+            .setContentIntent(contentIntent)
+
+        return builder.build()
+    }
+
+    fun isForegroundMode() :Boolean { return _isForegroundModeStarted }
+
+    fun hasOngoingCalls() : Boolean {
+        return !_ongoingCalls.isEmpty()
+    }
+
+    fun syncCallsState(args : HashMap<String, Any?>) {
+        _callsState = args
+    }
+
+    fun getCallsState() : HashMap<String, Any?>? {
+        return _callsState
+    }
+
+    private fun removeCallFromSavedState(callId: Int) {
+        if(_callsState==null) return
+
+        val switchedCallId = _callsState!!.get("switchedCallId") as? Int
+        if(switchedCallId == callId) _callsState!!.remove("switchedCallId")
+
+        val callsList = _callsState!!.get("callsList") as? ArrayList<*>
+        if(callsList==null) return
+        for (call in callsList) {
+            val callDict = call as? HashMap<*, *>?
+            val myCallId = callDict?.get("myCallId") as? Int?
+            if(myCallId == callId) {
+                callsList.remove(call)
+                break
+            }
+        }
+    }
+
+    private fun acquireWakelock() {
+        if (ContextCompat.checkSelfPermission(_context, Manifest.permission.WAKE_LOCK)
+            != PackageManager.PERMISSION_GRANTED) return
+
+        if (_wakeLock == null) {
+            val powerManager = _context.getSystemService(POWER_SERVICE) as PowerManager
+            _wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SipConnect:WakeLock.")
+        }
+        if (_wakeLock != null && !_wakeLock!!.isHeld) {
+            _wakeLock!!.acquire()
+        }
+    }
+
+    private fun releaseWakelock() {
+        if (_wakeLock != null && _wakeLock!!.isHeld) {
+            _wakeLock!!.release()
+        }
+    }
+
+    //Handle 'Reject'/'StopRinger' action
+    class NotifActionReceiver(service : CallNotifService) : BroadcastReceiver() {
+        private val _service = service
+
+        override fun onReceive(context: Context, intent: Intent?) {
+            Log.d(TAG, "onReceive $intent")
+            when(intent?.action) {
+                kActionIncomingCallReject -> _service.handleIncomingCallIntent(intent)
+                kActionOngoingCallHangup -> _service.handleOngoingCallIntent(intent)
+                kActionIncomingCallStopRinger -> _service._ringer.stop()
+            }
+        }
+    }
+
+    //Handle core events
+    class CoreEventsListener(service : CallNotifService) : ISiprixServiceListener {
+        private val _service = service
+        override fun onRingerState(start: Boolean) {
+            _service.onRingerState(start)
+        }
+        override fun onCallTerminated(callId: Int, statusCode: Int) {
+            _service.onCallTerminated(callId, statusCode)
+        }
+        override fun onCallConnected(callId: Int, hdrFrom: String?, hdrTo: String?, withVideo:Boolean) {
+            _service.onCallConnected(callId, hdrFrom, hdrTo, withVideo)
+        }
+        override fun onCallIncoming(callId: Int, accId: Int, withVideo: Boolean,
+                                    hdrFrom: String, hdrTo: String) {
+            _service.onCallIncoming(callId, accId, withVideo, hdrFrom, hdrTo)
+        }
+        override fun onMessageIncoming(messageId: Int, accId: Int,
+                                       hdrFrom: String?, body: String?) {
+            _service.onMessageIncoming(messageId, accId, hdrFrom, body)
+        }
+    }
+
+    open fun onRingerState(start: Boolean) {
+        try {
+            if (start) _ringer.start()
+            else       _ringer.stop()
+        } catch (ex: Exception) {
+            core?.moduleWriteLog("Ringer error: '${ex}")
+        }
+    }
+
+    open fun onCallTerminated(callId: Int, statusCode: Int) {
+        removeCallFromSavedState(callId)
+        removeOngoingNotification(callId)
+    }
+
+    open fun onCallConnected(callId: Int, hdrFrom: String?, hdrTo: String?, withVideo:Boolean) {
+        if (shouldShowOngoinCallNotif()) {
+            displayOngoingCallNotification(callId, hdrFrom, hdrTo, withVideo)
+        }
+    }
+
+    open fun onCallIncoming(callId: Int, accId: Int, withVideo: Boolean,
+                            hdrFrom: String, hdrTo: String) {
+        Log.i(TAG, "onCallIncoming $callId")
+        if (shouldShowNotificationWhenInForeground() || !isAppInForeground()) {
+            displayIncomingCallNotification(callId, accId, withVideo, hdrFrom, hdrTo)
+        }
+    }
+
+    open fun onMessageIncoming(messageId: Int, accId: Int,
+                                   hdrFrom: String?, body: String?) {
+        Log.i(TAG, "onMessageIncoming $messageId")
+        if (shouldShowNotificationWhenInForeground() || !isAppInForeground()) {
+            displayIncomingMessageNotification(messageId, accId, hdrFrom, body)
+        }
+    }
+
+    protected fun accountUnregister(accountId: Int) {
+        core?.accountUnregister(accountId)
+    }
+
+    protected fun accountDelete(accountId: Int) {
+        core?.accountDelete(accountId)
+    }
+
+    protected fun isAppInForeground(): Boolean {
+        val am = _context.getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val appProcs = am.runningAppProcesses
+        for (app in appProcs) {
+            if (app.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                val found = listOf(*app.pkgList).contains(_context.packageName)
+                if (found) return true
+            }
+        }
+        return false
+    }
+
+    protected fun buildContentString(hdrFrom: String?) : String {
+        //hdrFrom has format: "displName" <sip:ext@domain:port>
+        val unknown = "Unknown"
+        if(hdrFrom==null) return unknown
+
+        val displName = hdrFrom.substringAfter("\"", missingDelimiterValue = "")
+                                .substringBefore("\"", missingDelimiterValue = "")
+        val sipExt = hdrFrom.substringAfter(":", missingDelimiterValue = unknown)
+                            .substringBefore("@", missingDelimiterValue = unknown)
+
+        //Return same value as Flutter app in 'CallModel.nameAndExt'
+        return if(displName.isEmpty()) sipExt else "$displName ($sipExt)"
+    }
+
+    class LabelResources (context: Context) {
+        private val _context = context
+        val appName: String
+        val callIncomingChannelName: String
+        val callOngoingChannelName: String
+        val foregroundChannelName: String
+        val msgChannelName: String
+        val foregroundDescr: String
+        val iconId: Int
+
+        init {
+            appName = getStrResource("app_name") ?:
+                        if(_context.applicationInfo!=null) _context.applicationInfo.loadLabel(_context.packageManager).toString()
+                        else _context.packageName
+
+            callIncomingChannelName = getStrResource(kResourceCallIncomingChannelName)?: "Incoming calls"
+            callOngoingChannelName = getStrResource(kResourceCallOngoingChannelName)?: "Ongoing calls"
+            foregroundChannelName = getStrResource(kResourceForegroundChannelName)?: "Foreground service"
+            msgChannelName = getStrResource(kResourceMsgChannelName)?: "Messages"
+
+            foregroundDescr = getStrResource(kResourceForegroundDescr)?: "$appName calls service"
+
+            val res = getResource(kResourceNotifIcon, "drawable")
+            iconId = if(res != 0) res else getResource("ic_launcher", "mipmap")
+        }
+
+        companion object {
+            const val kResourceForegroundDescr = "foreground_descr"
+            const val kResourceCallIncomingChannelName = "call_incoming_channel_name"
+            const val kResourceCallOngoingChannelName = "call_ongoing_channel_name"
+            const val kResourceForegroundChannelName = "foreground_channel_name"
+            const val kResourceMsgChannelName = "msg_channel_name"
+            const val kResourceNotifIcon = "ic_notif_icon"
+        }
+
+        @SuppressLint("DiscouragedApi")
+        private fun getStrResource(resName: String): String? {
+            val stringRes = _context.resources.getIdentifier(resName, "string", _context.packageName)
+            return if(stringRes != 0) _context.getString(stringRes) else null
+        }
+
+        @SuppressLint("DiscouragedApi")
+        private fun getResource(resName: String, defType: String): Int {
+            return _context.resources.getIdentifier(resName, defType, _context.packageName)
+        }
+    }
+
+    companion object {
+        private const val TAG = "CallNotifService"
+        const val kCallIncomingChannelId = "kSipConnectCallIncomingChannelId"
+        const val kCallOngoingChannelId = "kSipConnectCallOngoingChannelId"
+        const val kForegroundChannelId = "kSipConnectForegroundChannelId"
+        const val kMsgChannelId  = "kSipConnectMsgChannelId"
+
+        const val kActionForeground = "kActionForeground"
+        
+        const val kActionIncomingCall = "kActionIncomingCall"
+        const val kActionIncomingCallAccept = "kActionIncomingCallAccept"
+        const val kActionIncomingCallReject = "kActionIncomingCallReject"
+        const val kActionIncomingCallStopRinger = "kActionIncomingCallStopRinger"
+        const val kActionOngoingCall = "kActionOngoingCall"
+        const val kActionOngoingCallHangup = "kActionOngoingCallHangup"
+        const val kActionIncomingMsg = "kActionIncomingMsg"
+
+        const val kExtraCallId   = "kExtraCallId"
+        const val kExtraMsgId    = "kExtraMsgId"
+        const val kExtraAccId    = "kExtraAccId"
+        const val kExtraWithVideo= "kExtraWithVideo"
+        const val kExtraHdrFrom  = "kExtraHdrFrom"
+        const val kExtraHdrTo    = "kExtraHdrTo"
+        const val kExtraBody     = "kExtraBody"
+
+        const val kForegroundId = 11
+
+        //Single instance, provides access to calling functionality
+        private var core: SiprixCore? = null
+
+        @Synchronized
+        fun createSipCore(appContext : Context): SiprixCore {
+            if(core == null) {
+                core = SiprixCore(appContext)
+                Log.d(TAG, "createSipCore $core")
+            }
+            else Log.d(TAG, "createSipCore return existing $core")
+            return core!!
+        }
+    }
+}

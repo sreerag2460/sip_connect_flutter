@@ -1,0 +1,26 @@
+# Dart/Flutter
+.dart_tool/
+.packages
+build/
+pubspec.lock
+example/.dart_tool/
+example/build/
+example/ios/Pods/
+example/ios/.symlinks/
+example/android/.gradle/
+example/android/local.properties
+
+# IDE / OS
+.idea/
+*.iml
+.DS_Store
+
+# Android
+android/.gradle/
+android/local.properties
+
+# PJSIP native build working dirs (see native/README.md)
+native/.work/
+native/.work-ios/
+native/build-android.log
+native/build-ios.log

@@ -1,0 +1,28 @@
+name: sip_connect_flutter
+description: Flutter VoIP/SIP plugin for Android and iOS — voice/video calls, messaging, and BLF/presence subscriptions, built on a prebuilt native SIP engine.
+version: 1.0.0
+publish_to: 'none' # remove when ready to publish
+
+environment:
+  sdk: ^3.12.0
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  intl: ^0.20.1
+  plugin_platform_interface: ^2.1.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.sipconnect.voip_sdk
+        pluginClass: SipConnectFlutterPlugin
+      ios:
+        pluginClass: SipConnectFlutterPlugin
