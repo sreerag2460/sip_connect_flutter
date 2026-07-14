@@ -1,32 +1,30 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 //import 'package:firebase_core/firebase_core.dart';
 //import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'package:sip_connect_flutter/accounts_model.dart';
-import 'package:sip_connect_flutter/messages_model.dart';
-import 'package:sip_connect_flutter/network_model.dart';
 import 'package:sip_connect_flutter/cdrs_model.dart';
 import 'package:sip_connect_flutter/devices_model.dart';
 import 'package:sip_connect_flutter/logs_model.dart';
-import 'package:sip_connect_flutter/subscriptions_model.dart';
+import 'package:sip_connect_flutter/messages_model.dart';
+import 'package:sip_connect_flutter/network_model.dart';
 import 'package:sip_connect_flutter/sip_connect.dart';
+import 'package:sip_connect_flutter/subscriptions_model.dart';
 
 import 'accouns_model_app.dart';
-import 'calls_model_app.dart';
-import 'subscr_model_app.dart';
-
 import 'account_add.dart';
 import 'call_add.dart';
-import 'subscr_add.dart';
-import 'settings.dart';
+import 'calls_model_app.dart';
 import 'home.dart';
+import 'settings.dart';
+import 'subscr_add.dart';
+import 'subscr_model_app.dart';
 
 //const FirebaseOptions gFCMOptions = FirebaseOptions(
 //      apiKey: '...',            //Copy from `google-services.json` - `client.api_key.current_key`
@@ -41,21 +39,27 @@ void main() async {
   //await _initializeFCM();
 
   //Create models
-  LogsModel logsModel           = LogsModel(true);//Set 'false' when logs won't rendering on UI
-  CdrsModel cdrsModel           = CdrsModel();//List of recent calls (Call Details Records)
+  LogsModel logsModel =
+      LogsModel(true); //Set 'false' when logs won't rendering on UI
+  CdrsModel cdrsModel =
+      CdrsModel(); //List of recent calls (Call Details Records)
 
-  DevicesModel devicesModel      = DevicesModel(logsModel);//List of devices
-  NetworkModel networkModel      = NetworkModel(logsModel);//Network state details
-  AppAccountsModel accountsModel = AppAccountsModel(logsModel);//List of accounts
-  MessagesModel messagesModel    = MessagesModel(accountsModel, logsModel);//List of messages
-  AppCallsModel callsModel       = AppCallsModel(accountsModel, logsModel, cdrsModel);//List of calls
-  SubscriptionsModel subscrModel = SubscriptionsModel(accountsModel, createSubscrFromJson, logsModel);//List of subscriptions
+  DevicesModel devicesModel = DevicesModel(logsModel); //List of devices
+  NetworkModel networkModel = NetworkModel(logsModel); //Network state details
+  AppAccountsModel accountsModel =
+      AppAccountsModel(logsModel); //List of accounts
+  MessagesModel messagesModel =
+      MessagesModel(accountsModel, logsModel); //List of messages
+  AppCallsModel callsModel =
+      AppCallsModel(accountsModel, logsModel, cdrsModel); //List of calls
+  SubscriptionsModel subscrModel = SubscriptionsModel(
+      accountsModel, createSubscrFromJson, logsModel); //List of subscriptions
   //VuMeterModel vuModel         = VuMeterModel();
   //VoiceMailModel vmModel       = VoiceMailModel(logsModel);
 
   //Run app
-  runApp(
-    MultiProvider(providers:[
+  runApp(MultiProvider(
+    providers: [
       ChangeNotifierProvider(create: (context) => accountsModel),
       ChangeNotifierProvider(create: (context) => networkModel),
       ChangeNotifierProvider(create: (context) => devicesModel),
@@ -111,7 +115,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
-  static String _ringtonePath="";
+  static String _ringtonePath = "";
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -157,10 +161,11 @@ class _MyAppState extends State<MyApp> {
     super.initState();
 
     _initializeSipConnect(context.read<LogsModel>());
-    widget.writeRingtoneAsset();//after initialize SipConnect as uses its 'homeFolder'
+    widget
+        .writeRingtoneAsset(); //after initialize SipConnect as uses its 'homeFolder'
     _readSavedState();
 
-    if(Platform.isAndroid)
+    if (Platform.isAndroid)
       _listener = AppLifecycleListener(onInactive: _onAndroidAppInactive);
   }
 
@@ -180,10 +185,12 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       routes: <String, WidgetBuilder>{
-        CallAddPage.routeName: (BuildContext context) => const CallAddPage(true),
+        CallAddPage.routeName: (BuildContext context) =>
+            const CallAddPage(true),
         SettingsPage.routeName: (BuildContext context) => const SettingsPage(),
         AccountPage.routeName: (BuildContext context) => const AccountPage(),
-        SubscrAddPage.routeName: (BuildContext context) => const SubscrAddPage(),
+        SubscrAddPage.routeName: (BuildContext context) =>
+            const SubscrAddPage(),
       },
       home: const HomePage(),
       title: 'SipConnect VoIP app',
@@ -244,8 +251,8 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  void _loadModels(String accJsonStr, String cdrsJsonStr,
-                  String subsJsonStr, String msgsJsonStr) async {
+  void _loadModels(String accJsonStr, String cdrsJsonStr, String subsJsonStr,
+      String msgsJsonStr) async {
     //Accounts
     AppAccountsModel accs = context.read<AppAccountsModel>();
     accs.onSaveChanges = _saveAccountChanges;
@@ -305,9 +312,6 @@ class _MyAppState extends State<MyApp> {
     //else                  { return "";        }
   }
 }
-
-
-
 
 /*
 //=======================================//

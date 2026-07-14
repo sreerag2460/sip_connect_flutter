@@ -24,3 +24,11 @@ native/.work/
 native/.work-ios/
 native/build-android.log
 native/build-ios.log
+
+# Flutter generated (example)
+example/ios/Flutter/Generated.xcconfig
+example/ios/Flutter/flutter_export_environment.sh
+example/ios/Flutter/ephemeral/
+example/.flutter-plugins-dependencies
+example/ios/Flutter/ephemeral/flutter_native_integration.env
+example/ios/**/xcuserdata/

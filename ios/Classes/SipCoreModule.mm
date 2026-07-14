@@ -110,6 +110,7 @@ struct Engine {
     __weak id<SipCoreEventDelegate> delegate = nil;
     bool initialized = false;
     bool callKitEnabled = false;
+    bool tlsAvailable = false;
     std::string lastError;
     std::string home;
 
@@ -384,7 +385,16 @@ void CoreBuddy::onBuddyState() {
         tcpCfg.qosType = PJ_QOS_TYPE_VOICE;
         ep->transportCreate(PJSIP_TRANSPORT_UDP, udpCfg);
         ep->transportCreate(PJSIP_TRANSPORT_TCP, tcpCfg);
-        // TLS transport arrives with the P5 OpenSSL build.
+        try {
+            TransportConfig tlsCfg;
+            tlsCfg.qosType = PJ_QOS_TYPE_VOICE;
+            tlsCfg.tlsConfig.verifyServer = iniData.tlsVerifyServer.boolValue;
+            ep->transportCreate(PJSIP_TRANSPORT_TLS, tlsCfg);
+            _eng->tlsAvailable = true;
+        } catch (Error &err) {
+            NSLog(@"[SipCore] TLS transport unavailable (built without OpenSSL): %s", err.info().c_str());
+            _eng->tlsAvailable = false;
+        }
 
         ep->libStart();
         _eng->ep = ep;
@@ -591,6 +601,12 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
 
 - (int)accountAdd:(SipCoreAccData*)accData {
     GUARD_INIT();
+    // PJSIP silently skips registration (no onRegState callback at all) when
+    // the account's transport can't produce a Contact — fail loudly instead.
+    if (accData.transport == SipTransportTls && !_eng->tlsAvailable) {
+        _eng->lastError = "TLS transport is not available in this engine build";
+        return -1;
+    }
     try {
         CoreAccount *acc = new CoreAccount(_eng, _eng->nextAccId);
         acc->server = cpp(accData.sipServer);

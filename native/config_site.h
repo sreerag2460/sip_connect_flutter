@@ -35,14 +35,12 @@
 #define PJMEDIA_HAS_ANDROID_MEDIACODEC       0
 
 /* --- SRTP / TLS ----------------------------------------------------------
- * P0 has no cross-compiled OpenSSL, so TLS transport and SSL sockets are OFF
- * (configure also runs with --disable-ssl so host/homebrew OpenSSL can't leak
- * in). SRTP stays on via the bundled libsrtp with its built-in crypto (SDES
- * keying; DTLS-SRTP needs OpenSSL). P5 builds OpenSSL per ABI and flips these.
+ * OpenSSL is cross-compiled per ABI/slice by the build scripts (see
+ * VERSIONS.md), enabling TLS transport, SSL sockets and DTLS-SRTP keying.
  */
 #define PJMEDIA_HAS_SRTP                     1
-#define PJSIP_HAS_TLS_TRANSPORT              0
-#define PJ_HAS_SSL_SOCK                      0
+#define PJSIP_HAS_TLS_TRANSPORT              1
+#define PJ_HAS_SSL_SOCK                      1
 
 /* --- ICE / STUN / TURN --------------------------------------------------- */
 #define PJNATH_HAS_STUN                      1

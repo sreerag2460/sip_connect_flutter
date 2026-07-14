@@ -118,6 +118,9 @@ class SipCore(private val appContext: Context) {
 
   private var ep: Endpoint? = null
   private var iniData: IniData? = null
+  // Routes PJSIP's log to logcat (default writer prints to stdout, which
+  // Android discards). Kept as a field: pjsua2 holds only a weak director ref.
+  private var logWriter: org.pjsip.pjsua2.LogWriter? = null
   @Volatile var isInitialized: Boolean = false
     private set
   private var lastErrText: String = ""
@@ -139,6 +142,7 @@ class SipCore(private val appContext: Context) {
 
   private var selAudioDevice = AudioDevice.Earpiece
   private var netLost = false
+  private var tlsAvailable = false
 
   // ------------------------------------------------------------- plumbing --
 
@@ -200,6 +204,12 @@ class SipCore(private val appContext: Context) {
       cfg.logConfig.level = (5 - ini.logLevelFile.value).toLong().coerceIn(0, 5)
       cfg.logConfig.consoleLevel = (5 - ini.logLevelIde.value).toLong().coerceIn(0, 5)
       cfg.logConfig.filename = homeFolder + "sip_connect.log"
+      logWriter = object : org.pjsip.pjsua2.LogWriter() {
+        override fun write(entry: org.pjsip.pjsua2.LogEntry) {
+          Log.i("pjsip", entry.msg.trimEnd())
+        }
+      }
+      cfg.logConfig.writer = logWriter
       ini.brandName?.let { cfg.uaConfig.userAgent = it }
       if (ini.singleCallMode) cfg.uaConfig.maxCalls = 4 // still need slots for attended transfer
 
@@ -211,7 +221,16 @@ class SipCore(private val appContext: Context) {
       if (ini.rtpStartPort > 0) { /* RTP range is set per-media below */ }
       endpoint.transportCreate(pjsip_transport_type_e.PJSIP_TRANSPORT_UDP, udpCfg)
       endpoint.transportCreate(pjsip_transport_type_e.PJSIP_TRANSPORT_TCP, tcpCfg)
-      // TLS transport comes with the P5 OpenSSL build (PJSIP_HAS_TLS_TRANSPORT).
+      tlsAvailable = try {
+        val tlsCfg = TransportConfig()
+        tlsCfg.qosType = pj_qos_type.PJ_QOS_TYPE_VOICE
+        tlsCfg.tlsConfig.verifyServer = ini.tlsVerifyServer
+        endpoint.transportCreate(pjsip_transport_type_e.PJSIP_TRANSPORT_TLS, tlsCfg)
+        true
+      } catch (t: Throwable) {
+        Log.w(TAG, "TLS transport unavailable (engine built without OpenSSL): $t")
+        false
+      }
 
       endpoint.libStart()
       ep = endpoint
@@ -237,6 +256,7 @@ class SipCore(private val appContext: Context) {
 
   private inner class PjAccount(val wireId: Int, var accData: AccData) : Account() {
     override fun onRegState(prm: OnRegStateParam) {
+      Log.i(TAG, "onRegState acc:$wireId code:${prm.code} reason:${prm.reason}")
       val info = try { info } catch (t: Throwable) { null }
       val expiration = info?.regExpiresSec ?: 0
       val active = info?.regIsActive ?: false
@@ -293,6 +313,10 @@ class SipCore(private val appContext: Context) {
   private val pendingMsgIds = ConcurrentLinkedQueue<Int>()
 
   private fun buildAccountConfig(a: AccData): AccountConfig {
+    // PJSIP silently skips registration (no onRegState callback at all) when
+    // the account's transport can't produce a Contact — fail loudly instead.
+    if (a.transport == AccData.SipTransport.Tls && !tlsAvailable)
+      throw Exception("TLS transport is not available in this engine build")
     val cfg = AccountConfig()
     val transportSuffix = when (a.transport) {
       AccData.SipTransport.Tcp -> ";transport=tcp"

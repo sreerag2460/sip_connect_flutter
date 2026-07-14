@@ -6,6 +6,7 @@ re-run the full build so the produced binaries stay reproducible.
 | Component | Version | Why pinned |
 |---|---|---|
 | pjproject (PJSIP) | **2.15.1** | SIP + media engine (pjsua2 API) |
+| OpenSSL | **3.3.2** | TLS transport + DTLS-SRTP (static, per ABI/slice) |
 | Android NDK | **26.3.11579264** (r26d) | Stable LTS; PJSIP builds clean |
 | Android min API | **21** | Matches the plugin's `minSdkVersion` |
 | Android ABIs | armeabi-v7a, arm64-v8a, x86, x86_64 | Same 4 the Siprix AAR shipped |
