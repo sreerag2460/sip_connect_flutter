@@ -25,14 +25,14 @@ import androidx.core.app.Person
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
-import com.siprix.ISiprixRinger
-import com.siprix.ISiprixServiceListener
-import com.siprix.SiprixCore
-import com.siprix.SiprixRinger
+import com.sipconnect.core.ISipRinger
+import com.sipconnect.core.ISipServiceListener
+import com.sipconnect.core.SipCore
+import com.sipconnect.core.SipRinger
 
 
 open class CallNotifService : Service() {
-    private lateinit var _ringer: ISiprixRinger
+    private lateinit var _ringer: ISipRinger
     private lateinit var _appResources: LabelResources
     private lateinit var _context: Context
 
@@ -66,7 +66,7 @@ open class CallNotifService : Service() {
 
         core?.setServiceListener(CoreEventsListener(this))
         _appResources = LabelResources(context)
-        _ringer = SiprixRinger(context)
+        _ringer = SipRinger(context)
 
         createNotifChannel()
     }
@@ -446,7 +446,7 @@ open class CallNotifService : Service() {
     }
 
     //Handle core events
-    class CoreEventsListener(service : CallNotifService) : ISiprixServiceListener {
+    class CoreEventsListener(service : CallNotifService) : ISipServiceListener {
         private val _service = service
         override fun onRingerState(start: Boolean) {
             _service.onRingerState(start)
@@ -612,12 +612,12 @@ open class CallNotifService : Service() {
         const val kForegroundId = 11
 
         //Single instance, provides access to calling functionality
-        private var core: SiprixCore? = null
+        private var core: SipCore? = null
 
         @Synchronized
-        fun createSipCore(appContext : Context): SiprixCore {
+        fun createSipCore(appContext : Context): SipCore {
             if(core == null) {
-                core = SiprixCore(appContext)
+                core = SipCore(appContext)
                 Log.d(TAG, "createSipCore $core")
             }
             else Log.d(TAG, "createSipCore return existing $core")

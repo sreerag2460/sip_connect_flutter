@@ -1,55 +1,13 @@
-@file:Suppress("SpellCheckingInspection", "UNUSED_PARAMETER", "UNCHECKED_CAST", "DEPRECATION")
+@file:Suppress("SpellCheckingInspection", "UNUSED_PARAMETER")
 package com.sipconnect.voip_sdk
 
-//import io.flutter.embedding.android.FlutterActivity
-
-import android.Manifest
-import android.app.Activity
-import android.app.AlertDialog
-import android.app.NotificationManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.DialogInterface
-import android.content.Intent
-import android.content.ServiceConnection
-import android.content.SharedPreferences
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import android.os.Bundle
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
-import android.util.Log
-import android.view.WindowManager
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import com.siprix.AccData
-import com.siprix.DestData
-import com.siprix.ISiprixModelListener
-import com.siprix.IniData
-import com.siprix.MsgData
-import com.siprix.SiprixCore
-import com.siprix.SiprixEglBase
-import com.siprix.SubscrData
-import com.siprix.VideoData
-import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.embedding.engine.plugins.activity.ActivityAware
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.EventChannel.EventSink
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.PluginRegistry
 import io.flutter.view.TextureRegistry
 import io.flutter.view.TextureRegistry.SurfaceProducer
-import org.webrtc.EglBase
-import org.webrtc.EglRenderer
-import org.webrtc.GlRectDrawer
-import org.webrtc.RendererCommon
-import org.webrtc.ThreadUtils
-import java.util.concurrent.CountDownLatch
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -58,7 +16,7 @@ import java.util.concurrent.CountDownLatch
 class FlutterRendererAdapter(texturesRegistry: TextureRegistry,
                              messenger: BinaryMessenger) : EventChannel.StreamHandler {
   private val surfaceTextureRenderer: SurfaceTextureRenderer
-  private val rendererEvents: RendererCommon.RendererEvents
+  private val rendererEvents: VideoRendererEvents
   private val producer: SurfaceProducer
   private val eventChannel: EventChannel
   private var eventSink: EventSink? = null
@@ -69,7 +27,7 @@ class FlutterRendererAdapter(texturesRegistry: TextureRegistry,
     rendererEvents = RendererEventsListener(this)
 
     surfaceTextureRenderer = SurfaceTextureRenderer("")
-    surfaceTextureRenderer.init(SiprixEglBase.getInstance().context, rendererEvents)
+    surfaceTextureRenderer.init(rendererEvents)
     surfaceTextureRenderer.surfaceCreated(producer)
 
     this.eventChannel = EventChannel(messenger, "SipConnect/Texture" + producer.id())
@@ -101,7 +59,7 @@ class FlutterRendererAdapter(texturesRegistry: TextureRegistry,
     eventSink = null
   }
 
-  class RendererEventsListener(private val adapter: FlutterRendererAdapter) : RendererCommon.RendererEvents {
+  class RendererEventsListener(private val adapter: FlutterRendererAdapter) : VideoRendererEvents {
     private var _rotation = -1
     private var _width = 0
     private var _height = 0

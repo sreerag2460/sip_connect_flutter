@@ -37,6 +37,10 @@ fi
 cp "$HERE/config_site.h" "$SRC/pjlib/include/pj/config_site.h"
 
 for ABI in "${ABIS[@]}"; do
+  if [ -f "$JNILIBS/$ABI/libpjsua2.so" ]; then
+    echo "==> $ABI already built, skipping (delete $JNILIBS/$ABI to force)"
+    continue
+  fi
   echo "==> Building PJSIP for $ABI"
   ( cd "$SRC"
     # Stale/truncated .depend files break make at parse time — always start clean.
@@ -53,7 +57,9 @@ for ABI in "${ABIS[@]}"; do
     # Build ONLY the Java pjsua2 binding (avoids the csharp/mono target).
     # The java Makefile's default target builds libpjsua2.so + copies
     # libc++_shared.so next to it, and generates the org.pjsip.pjsua2 sources.
-    ( cd pjsip-apps/src/swig/java && make )
+    # Its output/ dir is NOT covered by distclean — clear it so the wrapper
+    # object from the previous ABI can't leak into this ABI's link.
+    ( cd pjsip-apps/src/swig/java && rm -rf output android/pjsua2/src/main/jniLibs && make )
   )
 
   # 3) Collect the .so + its libc++_shared.so dependency for this ABI.

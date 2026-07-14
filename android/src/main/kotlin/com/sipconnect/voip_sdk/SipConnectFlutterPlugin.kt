@@ -24,32 +24,22 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.siprix.AccData
-import com.siprix.DestData
-import com.siprix.ISiprixModelListener
-import com.siprix.IniData
-import com.siprix.MsgData
-import com.siprix.SiprixCore
-import com.siprix.SiprixEglBase
-import com.siprix.SubscrData
-import com.siprix.VideoData
+import com.sipconnect.core.AccData
+import com.sipconnect.core.DestData
+import com.sipconnect.core.IVideoRenderer
+import com.sipconnect.core.IniData
+import com.sipconnect.core.MsgData
+import com.sipconnect.core.SipCore
+import com.sipconnect.core.SubscrData
+import com.sipconnect.core.VideoData
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.BinaryMessenger
-import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.EventChannel.EventSink
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
 import io.flutter.view.TextureRegistry
-import io.flutter.view.TextureRegistry.SurfaceProducer
-import org.webrtc.EglBase
-import org.webrtc.EglRenderer
-import org.webrtc.GlRectDrawer
-import org.webrtc.RendererCommon
-import org.webrtc.ThreadUtils
-import java.util.concurrent.CountDownLatch
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -211,7 +201,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
   private lateinit var _channel : MethodChannel
 
   private lateinit var _eventListener : EventListener
-  private lateinit var _core : SiprixCore
+  private lateinit var _core : SipCore
 
   private var _activity: Activity? = null
   private var _bgService: CallNotifService? = null
@@ -645,7 +635,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
 
   private fun handleAccountAdd(args : HashMap<String, Any?>, result: MethodChannel.Result) {
     val accData = parseAccData(args)
-    val accIdArg = SiprixCore.IdOutArg()
+    val accIdArg = SipCore.IdOutArg()
     val err = _core.accountAdd(accData, accIdArg)
     if(err == kErrorCodeEOK){
       result.success(accIdArg.value)
@@ -749,7 +739,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
       }
     }
 
-    val callIdArg = SiprixCore.IdOutArg()
+    val callIdArg = SipCore.IdOutArg()
     val err = _core.callInvite(destData, callIdArg)
     if(err == kErrorCodeEOK) {
       result.success(callIdArg.value)
@@ -806,7 +796,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
       return
     }
 
-    val state = SiprixCore.IdOutArg()
+    val state = SipCore.IdOutArg()
     val err = _core.callGetHoldState(callId, state)
     if(err == kErrorCodeEOK){
       result.success(state.value)
@@ -875,7 +865,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
     }
 
     val err = _core.callSendDtmf(callId, dtmfs,
-      durationMs, interToneGapMs, SiprixCore.DtmfMethod.fromInt(method))
+      durationMs, interToneGapMs, SipCore.DtmfMethod.fromInt(method))
     sendResult(err, result)
   }
 
@@ -889,7 +879,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
       return
     }
 
-    val playerIdArg = SiprixCore.IdOutArg()
+    val playerIdArg = SipCore.IdOutArg()
     val err = _core.callPlayTone(callId, toneType, durationMs, playerIdArg)
     if(err == kErrorCodeEOK) {
       result.success(playerIdArg.value)
@@ -908,7 +898,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
       return
     }
 
-    val playerIdArg = SiprixCore.IdOutArg()
+    val playerIdArg = SipCore.IdOutArg()
     val err = _core.callPlayFile(callId, pathToMp3File, loop, playerIdArg)
     if(err == kErrorCodeEOK) {
       result.success(playerIdArg.value)
@@ -1053,7 +1043,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
     val contentType : String? = args["contentType"] as? String
     if(contentType != null) { msgData.setContentType(contentType); }
 
-    val msgIdArg = SiprixCore.IdOutArg()
+    val msgIdArg = SipCore.IdOutArg()
     val err = _core.messageSend(msgData, msgIdArg)
     if(err == kErrorCodeEOK) {
       result.success(msgIdArg.value)
@@ -1088,7 +1078,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
     val body : String? = args["body"] as? String
     if(body != null) { subscrData.setBody(body); }
 
-    val subscrIdArg = SiprixCore.IdOutArg()
+    val subscrIdArg = SipCore.IdOutArg()
     val err = _core.subscrCreate(subscrData, subscrIdArg)
     if(err == kErrorCodeEOK) {
       result.success(subscrIdArg.value)
@@ -1188,7 +1178,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
     val dvcIndex :Int? = args[kArgDvcIndex] as? Int
     if(dvcIndex != null) {
       val dvc = _core.dvcGetAudioDevice(dvcIndex)
-      if(!dvc.equals(SiprixCore.AudioDevice.None)) {
+      if(!dvc.equals(SipCore.AudioDevice.None)) {
         _core.dvcSetAudioDevice(dvc)
         result.success("Success")
       }else{
@@ -1274,7 +1264,7 @@ class SipConnectFlutterPlugin: FlutterPlugin,
 
     val renderAdapter: FlutterRendererAdapter? = renderAdapters[textureId]
     if(renderAdapter != null) {
-      val nullRenderer : EglRenderer? = null
+      val nullRenderer : IVideoRenderer? = null
       _core.callSetVideoRenderer(renderAdapter.srcCallId, nullRenderer)
       renderAdapter.dispose()
       renderAdapters.remove(textureId)
