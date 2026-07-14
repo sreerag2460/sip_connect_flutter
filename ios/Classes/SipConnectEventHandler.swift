@@ -2,11 +2,10 @@ import Flutter
 import UIKit
 import CallKit
 import PushKit
-import siprix
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //SipConnectEventHandler
-class SipConnectEventHandler : NSObject, SiprixEventDelegate {
+class SipConnectEventHandler : NSObject, SipCoreEventDelegate {
     private var _channel : FlutterMethodChannel
     private var _callKitProvider : SipConnectCxProvider?
     private var _pushKitDisabled : Bool = true

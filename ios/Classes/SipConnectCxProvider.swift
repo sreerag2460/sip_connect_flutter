@@ -2,13 +2,12 @@ import Flutter
 import UIKit
 import CallKit
 import PushKit
-import siprix
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///SipConnectCxProvider
 
 class SipConnectCxProvider : NSObject, CXProviderDelegate {
-    private let _sipModule : SiprixModule
+    private let _sipModule : SipCoreModule
     private let _eventHandler : SipConnectEventHandler
     private let _cxProvider: CXProvider!
     private let _cxCallCtrl: CXCallController
@@ -21,7 +20,7 @@ class SipConnectCxProvider : NSObject, CXProviderDelegate {
     static let kECallNotFound: Int32       = -1040
     static let kEConfRequires2Calls: Int32 = -1055
     
-    init(_ module:SiprixModule, eventHandler:SipConnectEventHandler, 
+    init(_ module:SipCoreModule, eventHandler:SipConnectEventHandler, 
          singleCallMode:Bool, includeInRecents:Bool, 
          allowMuteByCallKit:Bool, isEnabledPushKit:Bool, reportCallAsVideo:Bool) {
         _sipModule = module
@@ -288,7 +287,7 @@ class SipConnectCxProvider : NSObject, CXProviderDelegate {
         return providerConfiguration
     }
 
-    func cxActionNewOutgoingCall(_ destData : SiprixDestData) {
+    func cxActionNewOutgoingCall(_ destData : SipCoreDestData) {
         //Hold existing calls
         let transaction = CXTransaction()
         _callsList.forEach { call in
@@ -582,7 +581,7 @@ class SipConnectCxProvider : NSObject, CXProviderDelegate {
         public var cxAnswerAction : CXAnswerCallAction?
         public var cxEndAction : CXEndCallAction?
                   
-        init(_ destData:SiprixDestData) {
+        init(_ destData:SipCoreDestData) {
             self.mySipCallId = Int(destData.myCallId)
             self.isIncoming = false
 

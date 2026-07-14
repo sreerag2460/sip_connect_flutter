@@ -2,12 +2,11 @@ import Flutter
 import UIKit
 import CallKit
 import PushKit
-import siprix
 
 ///////////////////////////////////////////////////////////////////////////////////////
 //FlutterVideoRenderer
 
-class FlutterVideoRenderer : NSObject, SiprixVideoRendererDelegate, FlutterTexture, FlutterStreamHandler {
+class FlutterVideoRenderer : NSObject, SipCoreVideoRendererDelegate, FlutterTexture, FlutterStreamHandler {
     struct EventData {
         var width: Int32 = 0
         var height: Int32 = 0
@@ -70,7 +69,7 @@ class FlutterVideoRenderer : NSObject, SiprixVideoRendererDelegate, FlutterTextu
       return nil
     }
 
-    func copyFrameToCVPixelBuffer(frame : SiprixVideoFrame) {
+    func copyFrameToCVPixelBuffer(frame : SipCoreVideoFrame) {
         if (_pixelBufferWidth != frame.width() || _pixelBufferHeight != frame.height()) {
             _pixelBufferWidth  = Int(frame.width())
             _pixelBufferHeight = Int(frame.height())
@@ -95,7 +94,7 @@ class FlutterVideoRenderer : NSObject, SiprixVideoRendererDelegate, FlutterTextu
         CVPixelBufferUnlockBaseAddress(_pixelBuffer!, CVPixelBufferLockFlags(rawValue: 0))
     }
         
-    public func onFrame(_ videoFrame : SiprixVideoFrame) {
+    public func onFrame(_ videoFrame : SipCoreVideoFrame) {
         copyFrameToCVPixelBuffer(frame:videoFrame)
         sendEvent(frame:videoFrame)
         DispatchQueue.main.async {
@@ -112,7 +111,7 @@ class FlutterVideoRenderer : NSObject, SiprixVideoRendererDelegate, FlutterTextu
         }
     }
 
-    func sendEvent(frame : SiprixVideoFrame) {
+    func sendEvent(frame : SipCoreVideoFrame) {
         if(_eventData.rotation != frame.rotation()) {
             _eventData.rotation = frame.rotation()
             if(_eventSink != nil) {

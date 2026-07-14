@@ -2,7 +2,6 @@ import Flutter
 import UIKit
 import CallKit
 import PushKit
-import siprix
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //Method and argument names constants
@@ -151,7 +150,7 @@ let kArgMute = "mute"
 public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
   typealias ArgsMap = Dictionary<AnyHashable,Any>
 
-    var _sipModule : SiprixModule
+    var _sipModule : SipCoreModule
     var _eventHandler : SipConnectEventHandler
     var _callKitProvider : SipConnectCxProvider?
     var _pushKitProvider : SipConnectPushRegistry?
@@ -162,7 +161,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
     var _initialized = false
 
     init(withChannel channel:FlutterMethodChannel, registrar: FlutterPluginRegistrar) {
-        self._sipModule = SiprixModule()
+        self._sipModule = SipCoreModule()
         self._eventHandler = SipConnectEventHandler(withChannel:channel)
         self._textureRegistry = registrar.textures()
         self._binMessenger = registrar.messenger()
@@ -269,7 +268,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
         }
         
         //Get arguments from map
-        let iniData = SiprixIniData()
+        let iniData = SipCoreIniData()
         
         let license = args["license"] as? String
         if(license != nil) { iniData.license = license }
@@ -375,9 +374,9 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
     ////////////////////////////////////////////////////////////////////////////////////////
     //SipConnect Account methods implementation
 
-    func parseAccData(_ args : ArgsMap) -> SiprixAccData {
+    func parseAccData(_ args : ArgsMap) -> SipCoreAccData {
         //Get arguments from map
-        let accData = SiprixAccData()
+        let accData = SipCoreAccData()
         
         let sipServer = args["sipServer"] as? String
         if(sipServer != nil) { accData.sipServer = sipServer! }
@@ -540,7 +539,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
 
     func handleCallInvite(_ args : ArgsMap, result: @escaping FlutterResult) {
         //Get arguments from map
-        let destData = SiprixDestData()
+        let destData = SipCoreDestData()
         
         let toExt = args["extension"] as? String
         if(toExt != nil) { destData.toExt = toExt! }
@@ -624,7 +623,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        let data = SiprixHoldData()
+        let data = SipCoreHoldData()
         let err = _sipModule.callGetHoldState(Int32(callId!), holdState:data)
         if(err == kErrorCodeEOK){
             result(data.holdState.rawValue)
@@ -724,7 +723,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        let data = SiprixPlayerData()
+        let data = SipCorePlayerData()
         let err = _sipModule.callPlayTone(Int32(callId!), toneType:toneType!,
                                              durationMs:Int32(durationMs!), playerData:data)
         if(err == kErrorCodeEOK){
@@ -744,7 +743,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        let data = SiprixPlayerData()
+        let data = SipCorePlayerData()
         let err = _sipModule.callPlayFile(Int32(callId!), pathToMp3File:pathToMp3File!, 
                                               loop:loop!, playerData:data)
         if(err == kErrorCodeEOK){
@@ -887,7 +886,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
 
     func handleMessageSend(_ args : ArgsMap, result: @escaping FlutterResult) {
         //Get arguments from map
-        let msgData = SiprixMsgData()
+        let msgData = SipCoreMsgData()
         
         let toExt = args["extension"] as? String
         if(toExt != nil) { msgData.toExt = toExt! }
@@ -914,7 +913,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
 
     func handleSubscriptionAdd(_ args : ArgsMap, result: @escaping FlutterResult) {
         //Get arguments from map
-        let subscrData = SiprixSubscrData()
+        let subscrData = SipCoreSubscrData()
         
         let toExt = args["extension"] as? String
         if(toExt != nil) { subscrData.toExt = toExt! }
@@ -1007,19 +1006,19 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
     //SipConnect Devices methods implementation
     
     func handleDvcGetPlayoutNumber(_ args : ArgsMap, result: @escaping FlutterResult) {
-        //let data = SiprixDevicesNumbData()
+        //let data = SipCoreDevicesNumbData()
         //_sipModule.dvcGetPlayoutDevices(data)
         result(_devicesList.getCount())//result(data.number)
     }
 
     func handleDvcGetRecordNumber(_ args : ArgsMap, result: @escaping FlutterResult) {
-        //let data = SiprixDevicesNumbData()
+        //let data = SipCoreDevicesNumbData()
         //_sipModule.dvcGetRecordingDevices(data)
         result(0)//result(data.number)
     }
 
     func handleDvcGetVideoNumber(_ args : ArgsMap, result: @escaping FlutterResult) {
-        //let data = SiprixDevicesNumbData()
+        //let data = SipCoreDevicesNumbData()
         //_sipModule.dvcGetVideoDevices(data)
         result(0)//result(data.number)
     }
@@ -1090,7 +1089,7 @@ public class SipConnectFlutterPlugin: NSObject, FlutterPlugin {
     }
 
     func handleDvcSetVideoParams(_ args : ArgsMap, result: @escaping FlutterResult) {
-        let vdoData = SiprixVideoData()
+        let vdoData = SipCoreVideoData()
         
         let noCameraImgPath = args["noCameraImgPath"] as? String
         if(noCameraImgPath != nil) { vdoData.noCameraImgPath = noCameraImgPath }

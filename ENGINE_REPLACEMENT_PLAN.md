@@ -1,5 +1,15 @@
 # Replacing the Siprix engine with an open-source SIP stack
 
+> **Status (2026-07-14):** Engine chosen: **PJSIP 2.15.1** (GPLv2 — see §2 for
+> the licensing obligation). P0 is DONE on both platforms (jniLibs for 4 ABIs +
+> pjsip.xcframework, Siprix binaries removed). P1–P3 code paths are implemented:
+> Android `com.sipconnect.core.SipCore` (Kotlin on the pjsua2 Java binding) and
+> iOS `SipCoreModule.mm` (ObjC++ on the pjsua2 C++ API). All 26 wire-protocol
+> tests pass; the example app builds on Android and iOS. Still pending:
+> on-device call verification (P1/P2 gates), P4 video frames→Flutter texture,
+> P5 OpenSSL (TLS/DTLS-SRTP) + CallKit/PushKit re-verification, P6 BLF
+> (dialog-event SUBSCRIBE needs a pjsua2 extension; presence works), P3 Opus.
+
 Goal: remove the closed-source `sip_connect_core.aar` (Android) and
 `siprix.xcframework` / `siprixMedia.xcframework` (iOS) — and with them the trial
 60-second cap — while keeping the **exact same Dart API, channel protocol,

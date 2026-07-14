@@ -57,8 +57,13 @@ DEV_A="$(build_slice arm64  "$DEV_SDK" "-miphoneos-version-min=$MIN")"
 SIM_ARM_A="$(build_slice arm64  "$SIM_SDK" "-mios-simulator-version-min=$MIN")"
 SIM_X86_A="$(build_slice x86_64 "$SIM_SDK" "-mios-simulator-version-min=$MIN")"
 
-SIM_A="$WORK/libpjsip-sim.a"
-lipo -create "$SIM_ARM_A" "$SIM_X86_A" -output "$SIM_A"
+# CocoaPods requires every slice's library to share one binary name.
+DEV_DIR="$WORK/dev"; SIM_DIR="$WORK/sim"
+rm -rf "$DEV_DIR" "$SIM_DIR"; mkdir -p "$DEV_DIR" "$SIM_DIR"
+cp "$DEV_A" "$DEV_DIR/libpjsip.a"
+lipo -create "$SIM_ARM_A" "$SIM_X86_A" -output "$SIM_DIR/libpjsip.a"
+DEV_A="$DEV_DIR/libpjsip.a"
+SIM_A="$SIM_DIR/libpjsip.a"
 
 # Collect PJSIP public headers (pjsua2 headers live under pjsip/include).
 HEADERS="$WORK/headers"
