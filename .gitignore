@@ -32,3 +32,6 @@ example/ios/Flutter/ephemeral/
 example/.flutter-plugins-dependencies
 example/ios/Flutter/ephemeral/flutter_native_integration.env
 example/ios/**/xcuserdata/
+
+# Kotlin build tooling session caches
+example/android/.kotlin/
