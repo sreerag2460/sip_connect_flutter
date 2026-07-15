@@ -325,7 +325,16 @@ class SipCore(private val appContext: Context) {
       AccData.SipTransport.Tls -> ";transport=tls"
       else -> ""
     }
-    val hostPort = if (a.port > 0) "${a.sipServer}:${a.port}" else a.sipServer
+    // Server/destination host:port for the registrar + outbound proxy.
+    // IMPORTANT: a.port is the LOCAL transport bind port (the Dart layer
+    // randomizes it when unset — see AccountsModel._generateRandomLocalPort);
+    // it is NOT the server port and must never go into the registrar URI, or
+    // pjsip dials a random closed port and times out. The server port comes
+    // from an explicit "host:port" in sipServer, else the transport's standard
+    // SIP port (5061 TLS / 5060 UDP/TCP).
+    val stdPort = if (a.transport == AccData.SipTransport.Tls) 5061 else 5060
+    val serverHasPort = a.sipServer.substringAfterLast(':', "").toIntOrNull() != null
+    val hostPort = if (serverHasPort) a.sipServer else "${a.sipServer}:$stdPort"
     cfg.idUri = if (a.displName.isNullOrEmpty()) "sip:${a.sipExtension}@${a.sipServer}"
                 else "\"${a.displName}\" <sip:${a.sipExtension}@${a.sipServer}>"
     cfg.regConfig.registrarUri = "sip:$hostPort$transportSuffix"

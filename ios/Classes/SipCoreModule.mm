@@ -533,8 +533,16 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
     std::string transportSuffix;
     if (a.transport == SipTransportTcp) transportSuffix = ";transport=tcp";
     else if (a.transport == SipTransportTls) transportSuffix = ";transport=tls";
-    std::string hostPort = server;
-    if (a.port && a.port.intValue > 0) hostPort += ":" + std::to_string(a.port.intValue);
+    // Server/destination host:port for the registrar + outbound proxy.
+    // IMPORTANT: a.port is the LOCAL transport bind port (the Dart layer
+    // randomizes it when unset — see AccountsModel._generateRandomLocalPort);
+    // it is NOT the server port and must never go into the registrar URI, or
+    // pjsip dials a random closed port and times out. The server port comes
+    // from an explicit "host:port" in sipServer, else the transport's standard
+    // SIP port (5061 TLS / 5060 UDP/TCP).
+    int stdPort = (a.transport == SipTransportTls) ? 5061 : 5060;
+    bool serverHasPort = server.find(':') != std::string::npos;
+    std::string hostPort = serverHasPort ? server : server + ":" + std::to_string(stdPort);
 
     if (a.displName.length) cfg.idUri = "\"" + cpp(a.displName) + "\" <sip:" + ext + "@" + server + ">";
     else cfg.idUri = "sip:" + ext + "@" + server;
