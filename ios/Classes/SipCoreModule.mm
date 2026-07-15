@@ -544,7 +544,15 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
 
     std::string authId = a.sipAuthId.length ? cpp(a.sipAuthId) : ext;
     cfg.sipConfig.authCreds.push_back(AuthCredInfo("digest", "*", authId, 0, cpp(a.sipPassword)));
-    if (a.sipProxy.length) cfg.sipConfig.proxies.push_back("sip:" + cpp(a.sipProxy) + transportSuffix);
+    if (a.sipProxy.length) {
+        cfg.sipConfig.proxies.push_back("sip:" + cpp(a.sipProxy) + transportSuffix + ";lr");
+    } else {
+        // No explicit proxy: route all requests (INVITE/MESSAGE/SUBSCRIBE) through
+        // the registrar with the account's transport. Without this, a bare
+        // "sip:ext@server" target resolves to UDP:5060 and providers that only
+        // answer on the registered TLS/TCP connection let the INVITE time out (408).
+        cfg.sipConfig.proxies.push_back("sip:" + hostPort + transportSuffix + ";lr");
+    }
 
     if (a.xContactUriParams.count) {
         std::string params;

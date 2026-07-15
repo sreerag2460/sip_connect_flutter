@@ -334,8 +334,15 @@ class SipCore(private val appContext: Context) {
 
     val authId = a.sipAuthId ?: a.sipExtension
     cfg.sipConfig.authCreds.add(AuthCredInfo("digest", "*", authId, 0, a.sipPassword))
-    a.sipProxy?.takeIf { it.isNotEmpty() }?.let {
-      cfg.sipConfig.proxies.add("sip:$it$transportSuffix")
+    val proxy = a.sipProxy?.takeIf { it.isNotEmpty() }
+    if (proxy != null) {
+      cfg.sipConfig.proxies.add("sip:$proxy$transportSuffix;lr")
+    } else {
+      // No explicit proxy: route all requests (INVITE/MESSAGE/SUBSCRIBE) through
+      // the registrar with the account's transport. Without this, a bare
+      // "sip:ext@server" target resolves to UDP:5060 and providers that only
+      // answer on the registered TLS/TCP connection let the INVITE time out (408).
+      cfg.sipConfig.proxies.add("sip:$hostPort$transportSuffix;lr")
     }
     a.xContactUriParams.takeIf { it.isNotEmpty() }?.let { params ->
       cfg.sipConfig.contactUriParams =
