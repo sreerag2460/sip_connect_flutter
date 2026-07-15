@@ -272,10 +272,11 @@ class SipCore(private val appContext: Context) {
 
     override fun onIncomingCall(prm: OnIncomingCallParam) {
       val call = PjCall(this, prm.callId)
+      call.wireId = prm.callId + 1
       val wholeMsg = try { prm.rdata.wholeMsg } catch (t: Throwable) { "" }
       call.lastInviteMsg = wholeMsg
       val withVideo = wholeMsg.contains("m=video")
-      calls[prm.callId] = call
+      calls[call.wireId] = call
 
       // Send 180 Ringing so the caller hears ringback while we alert the user.
       try {
@@ -287,10 +288,11 @@ class SipCore(private val appContext: Context) {
       val ci = try { call.info } catch (t: Throwable) { null }
       val from = ci?.remoteUri ?: ""
       val to = ci?.localUri ?: ""
+      val callWireId = call.wireId
       onMain {
         serviceListener?.onRingerState(true)
-        serviceListener?.onCallIncoming(prm.callId, wireId, withVideo, from, to)
-        modelListener?.onCallIncoming(prm.callId, wireId, withVideo, from, to)
+        serviceListener?.onCallIncoming(callWireId, wireId, withVideo, from, to)
+        modelListener?.onCallIncoming(callWireId, wireId, withVideo, from, to)
       }
     }
 
@@ -440,6 +442,11 @@ class SipCore(private val appContext: Context) {
 
   private inner class PjCall(acc: PjAccount, callId: Int = -1) : Call(acc, callId) {
     val accWireId = acc.wireId
+    // Wire callId exposed to Dart = pjsua callId + 1. The Dart layer uses 0 as
+    // its "no call" sentinel (kEmptyCallId), but pjsua2 call ids are 0-based —
+    // so id 0 must never reach Dart. Set at creation; used for all map keys and
+    // events. See CallsModel.kEmptyCallId.
+    var wireId: Int = -1
     var lastInviteMsg: String = ""
     var localHold = false
     var remoteHold = false
@@ -457,7 +464,7 @@ class SipCore(private val appContext: Context) {
 
     override fun onCallState(prm: OnCallStateParam) {
       val ci = try { info } catch (t: Throwable) { return }
-      val id = ci.id
+      val id = wireId
       when (ci.state) {
         pjsip_inv_state.PJSIP_INV_STATE_EARLY -> {
           val response = "${ci.lastStatusCode} ${ci.lastReason}"
@@ -501,7 +508,7 @@ class SipCore(private val appContext: Context) {
 
     override fun onCallMediaState(prm: OnCallMediaStateParam) {
       val ci = try { info } catch (t: Throwable) { return }
-      val id = ci.id
+      val id = wireId
       var holdChanged = false
       for (i in 0 until ci.media.size) {
         val mi = ci.media[i.toInt()]
@@ -539,14 +546,12 @@ class SipCore(private val appContext: Context) {
         in 'A'..'D' -> 12 + (c - 'A')
         else -> return
       }
-      val id = try { info.id } catch (t: Throwable) { return }
-      onMain { modelListener?.onCallDtmfReceived(id, tone) }
+      onMain { modelListener?.onCallDtmfReceived(wireId, tone) }
     }
 
     override fun onCallTransferStatus(prm: OnCallTransferStatusParam) {
-      val id = try { info.id } catch (t: Throwable) { return }
       val code = prm.statusCode
-      onMain { modelListener?.onCallTransferred(id, code) }
+      onMain { modelListener?.onCallTransferred(wireId, code) }
     }
   }
 
@@ -591,7 +596,8 @@ class SipCore(private val appContext: Context) {
         val server = acc.accData.sipServer
         val uri = if (dest.toExt.contains("@")) "sip:${dest.toExt}" else "sip:${dest.toExt}@$server"
         call.makeCall(uri, prm)
-        val id = call.info.id
+        call.wireId = call.info.id + 1
+        val id = call.wireId
         calls[id] = call
         outId.value = id
         // Match the previous engine: a newly created outgoing call becomes the

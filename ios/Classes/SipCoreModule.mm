@@ -74,6 +74,11 @@ struct CoreAccount : public Account {
 struct CoreCall : public Call {
     Engine *eng;
     int accWireId;
+    // Wire callId exposed to Dart = pjsua callId + 1. The Dart layer uses 0 as
+    // its "no call" sentinel (kEmptyCallId), but pjsua2 call ids are 0-based —
+    // so id 0 must never reach Dart. Set at creation; used for all map keys and
+    // events. See CallsModel.kEmptyCallId.
+    int wireId = -1;
     std::string inviteMsg;
     bool localHold = false;
     bool remoteHold = false;
@@ -154,8 +159,7 @@ struct Engine {
         } catch (Error &err) { lastError = err.info(); }
     }
     void attachVideoView(CoreCall *call, int windowId) {
-        auto it = callViews.end();
-        try { it = callViews.find(call->getId()); } catch (...) { return; }
+        auto it = callViews.find(call->wireId);  // callViews keyed by wire id
         if (it == callViews.end() || windowId < 0) return;
         try {
             VideoWindow win(windowId);
@@ -193,9 +197,10 @@ void CoreAccount::onRegState(OnRegStateParam &prm) {
 void CoreAccount::onIncomingCall(OnIncomingCallParam &iprm) {
     CoreCall *call = new CoreCall(eng, *this, iprm.callId);
     call->accWireId = wireId;
+    call->wireId = iprm.callId + 1;
     call->inviteMsg = iprm.rdata.wholeMsg;
     bool withVideo = call->inviteMsg.find("m=video") != std::string::npos;
-    eng->calls[iprm.callId] = call;
+    eng->calls[call->wireId] = call;
 
     try {
         CallOpParam prm;
@@ -205,7 +210,7 @@ void CoreAccount::onIncomingCall(OnIncomingCallParam &iprm) {
 
     std::string from, to;
     try { CallInfo ci = call->getInfo(); from = ci.remoteUri; to = ci.localUri; } catch (Error &) {}
-    NSInteger callId = iprm.callId, accId = wireId;
+    NSInteger callId = call->wireId, accId = wireId;
     NSString *f = str(from), *t = str(to);
     emitOn(eng, ^(SCDelegate d) {
         [d onRingerState:YES];
@@ -238,7 +243,7 @@ void CoreAccount::onInstantMessageStatus(OnInstantMessageStatusParam &prm) {
 void CoreCall::onCallState(OnCallStateParam &prm) {
     CallInfo ci;
     try { ci = getInfo(); } catch (Error &) { return; }
-    NSInteger callId = ci.id;
+    NSInteger callId = wireId;
     switch (ci.state) {
     case PJSIP_INV_STATE_EARLY: {
         NSString *response = str(std::to_string(ci.lastStatusCode) + " " + ci.lastReason);
@@ -284,7 +289,7 @@ void CoreCall::onCallState(OnCallStateParam &prm) {
 void CoreCall::onCallMediaState(OnCallMediaStateParam &prm) {
     CallInfo ci;
     try { ci = getInfo(); } catch (Error &) { return; }
-    NSInteger callId = ci.id;
+    NSInteger callId = wireId;
     bool holdChanged = false;
     for (unsigned i = 0; i < ci.media.size(); ++i) {
         const CallMediaInfo &mi = ci.media[i];
@@ -318,14 +323,12 @@ void CoreCall::onDtmfDigit(OnDtmfDigitParam &prm) {
     else if (c == '#') tone = 11;
     else if (c >= 'A' && c <= 'D') tone = 12 + (c - 'A');
     else return;
-    NSInteger callId;
-    try { callId = getInfo().id; } catch (Error &) { return; }
+    NSInteger callId = wireId;
     emitOn(eng, ^(SCDelegate d) { [d onCallDtmfReceived:callId tone:tone]; });
 }
 
 void CoreCall::onCallTransferStatus(OnCallTransferStatusParam &prm) {
-    NSInteger callId;
-    try { callId = getInfo().id; } catch (Error &) { return; }
+    NSInteger callId = wireId;
     NSInteger code = prm.statusCode;
     emitOn(eng, ^(SCDelegate d) { [d onCallTransferred:callId statusCode:code]; });
 }
@@ -695,7 +698,8 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
         std::string uri = (toExt.find('@') != std::string::npos)
             ? "sip:" + toExt : "sip:" + toExt + "@" + acc->server;
         call->makeCall(uri, prm);
-        int callId = call->getId();
+        call->wireId = call->getId() + 1;
+        int callId = call->wireId;
         _eng->calls[callId] = call;
         destData.myCallId = callId;
         // Match the previous engine: a newly created outgoing call becomes the
