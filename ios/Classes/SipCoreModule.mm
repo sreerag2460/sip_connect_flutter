@@ -582,7 +582,18 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
         }
     }
 
-    cfg.natConfig.iceEnabled = a.iceEnabled.boolValue;
+    // Media encryption mode (computed early so ICE can key off it). TLS-signaling
+    // accounts default to SRTP; an explicit choice (incl. Disabled) is honored.
+    int secure = a.secureMedia ? a.secureMedia.intValue
+               : (a.transport == SipTransportTls ? SecureMediaSdesSrtp : SecureMediaDisabled);
+
+    // ICE: enable when the app asks OR when media is secure. Providers that bridge
+    // WebRTC-style media offer ICE + DTLS-SRTP (a=ice-ufrag / a=candidate with
+    // UDP/TLS/RTP/SAVP); without ICE the engine fires the DTLS ClientHello to the
+    // raw c= address, which the peer gates behind ICE connectivity checks, so the
+    // handshake never completes (PJMEDIA_SRTP_EKEYNOTREADY) -> no audio. ICE is
+    // additive: pjsip only activates it when the peer actually offers candidates.
+    cfg.natConfig.iceEnabled = a.iceEnabled.boolValue || (secure != SecureMediaDisabled);
     cfg.natConfig.contactRewriteUse = (a.rewriteContactIp == nil || a.rewriteContactIp.boolValue) ? 2 : 0;
     if (a.keepAliveTime && a.keepAliveTime.intValue > 0)
         cfg.natConfig.udpKaIntervalSec = a.keepAliveTime.intValue;
@@ -594,16 +605,10 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
         cfg.natConfig.turnPassword = cpp(a.turnPassword);
     }
 
-    // Media encryption. When the app doesn't specify it, default by transport:
-    // a TLS-signaling account almost always requires SRTP (providers reject a
-    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation.
-    // An explicit choice (incl. Disabled) is always honored.
     // OPTIONAL (not MANDATORY): still offers SRTP on outgoing calls, but accepts
     // a plain-RTP *incoming* call instead of failing media init with
     // PJMEDIA_SRTP_ESDPINTRANSPORT — mandatory left mismatched incoming calls
     // half-initialized and a retransmitted INVITE then crashed pjsua_call_on_incoming.
-    int secure = a.secureMedia ? a.secureMedia.intValue
-               : (a.transport == SipTransportTls ? SecureMediaSdesSrtp : SecureMediaDisabled);
     cfg.mediaConfig.srtpUse = (secure == SecureMediaDisabled) ? PJMEDIA_SRTP_DISABLED : PJMEDIA_SRTP_OPTIONAL;
     if (secure != SecureMediaDisabled) {
         // Enable BOTH SDES (a=crypto, RTP/SAVP) and DTLS-SRTP (UDP/TLS/RTP/SAVP)

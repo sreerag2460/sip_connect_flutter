@@ -381,7 +381,21 @@ class SipCore(private val appContext: Context) {
       }
     }
 
-    cfg.natConfig.iceEnabled = a.iceEnabled
+    // Media encryption mode (computed early so ICE can key off it). When the
+    // app doesn't specify, default by transport: a TLS-signaling account usually
+    // expects SRTP. An explicit choice (incl. Disabled) is always honored.
+    val secure = a.secureMedia
+      ?: if (a.transport == AccData.SipTransport.Tls) AccData.SecureMediaMode.SdesSrtp
+         else AccData.SecureMediaMode.Disabled
+
+    // ICE: enable when the app asks OR when media is secure. Providers that
+    // bridge WebRTC-style media offer ICE + DTLS-SRTP (a=ice-ufrag / a=candidate
+    // with UDP/TLS/RTP/SAVP); without ICE our engine fires the DTLS ClientHello
+    // to the raw c= address, which the peer gates behind ICE connectivity checks,
+    // so the handshake never completes (PJMEDIA_SRTP_EKEYNOTREADY) -> no audio.
+    // ICE is additive: pjsip only activates it when the peer actually offers
+    // candidates, so plain-RTP/SDES-without-ICE calls are unaffected.
+    cfg.natConfig.iceEnabled = a.iceEnabled || secure != AccData.SecureMediaMode.Disabled
     cfg.natConfig.contactRewriteUse = if (a.rewriteContactIp) 2 else 0
     if (a.keepAliveTime > 0) cfg.natConfig.udpKaIntervalSec = a.keepAliveTime.toLong()
     a.turnServer?.takeIf { it.isNotEmpty() }?.let {
@@ -394,18 +408,11 @@ class SipCore(private val appContext: Context) {
     // Note: pjsua2 STUN is endpoint-level; per-account stunServer is applied by
     // enabling SIP/media STUN use when configured (server set at init in P5).
 
-    // Media encryption. When the app doesn't specify it, default by transport:
-    // a TLS-signaling account usually expects SRTP (providers reject a plain-RTP
-    // offer with 488), so enable it. An explicit choice (incl. Disabled) is honored.
-    //
     // srtpUse OPTIONAL (1), not MANDATORY (2): OPTIONAL still offers SRTP on
     // outgoing calls, but ACCEPTS a plain-RTP *incoming* call instead of failing
     // media init with PJMEDIA_SRTP_ESDPINTRANSPORT. Mandatory left mismatched
     // incoming calls half-initialized; a retransmitted INVITE then re-entered
     // pjsua_call_on_incoming on the corrupt slot and crashed (SIGSEGV).
-    val secure = a.secureMedia
-      ?: if (a.transport == AccData.SipTransport.Tls) AccData.SecureMediaMode.SdesSrtp
-         else AccData.SecureMediaMode.Disabled
     cfg.mediaConfig.srtpUse = if (secure == AccData.SecureMediaMode.Disabled) 0 else 1
     // Offer crypto on outgoing even over a non-TLS-secured SDP so SRTP-requiring
     // servers still accept the offer.
