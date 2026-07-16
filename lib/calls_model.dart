@@ -829,6 +829,15 @@ class CallsModel extends ChangeNotifier with IterableMixin<CallModel> implements
     _callItems.remove(call);
     _logs?.print('Removed call: $callId');
 
+    // Hand focus off the ended call: to a remaining call, or clear it. Native
+    // only notifies onSwitched when handing off to a still-active call, so when
+    // the last call ends _switchedCallId would otherwise stay pointed at the
+    // removed call and the next new call could not take focus (switchedCall()
+    // returns null / the focused-call UI can't show it).
+    if(_switchedCallId == callId) {
+      _switchedCallId = _callItems.isNotEmpty ? _callItems.first.myCallId : kEmptyCallId;
+    }
+
     if(_confModeStarted && !hasConnectedFewCalls()) {
       _confModeStarted = false;
     }

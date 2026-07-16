@@ -49,6 +49,7 @@ import org.pjsip.pjsua2.VideoWindowHandle
 import org.pjsip.pjsua2.pj_qos_type
 import org.pjsip.pjsua2.pjmedia_type
 import org.pjsip.pjsua2.pjsip_inv_state
+import org.pjsip.pjsua2.pjsip_role_e
 import org.pjsip.pjsua2.pjsip_status_code
 import org.pjsip.pjsua2.pjsip_transport_type_e
 import org.pjsip.pjsua2.pjsua_call_flag
@@ -528,17 +529,27 @@ class SipCore(private val appContext: Context) {
       val id = wireId
       when (ci.state) {
         pjsip_inv_state.PJSIP_INV_STATE_EARLY -> {
-          val response = "${ci.lastStatusCode} ${ci.lastReason}"
-          onMain { modelListener?.onCallProceeding(id, response) }
+          // 'Proceeding' is an OUTGOING-call state (a 1xx response came back).
+          // On an incoming call, EARLY is us sending 180 Ringing — firing it
+          // would clobber the Dart 'ringing' state and break the incoming UI.
+          if (ci.role == pjsip_role_e.PJSIP_ROLE_UAC) {
+            val response = "${ci.lastStatusCode} ${ci.lastReason}"
+            onMain { modelListener?.onCallProceeding(id, response) }
+          }
         }
         pjsip_inv_state.PJSIP_INV_STATE_CONFIRMED -> {
-          wasConnected = true
-          val from = ci.remoteUri; val to = ci.localUri
-          val vid = videoActive
-          onMain {
-            serviceListener?.onRingerState(false)
-            serviceListener?.onCallConnected(id, from, to, vid)
-            modelListener?.onCallConnected(id, from, to, vid)
+          // Fire 'connected' only on the first CONFIRMED. A later re-INVITE /
+          // session refresh keeps the call CONFIRMED and must not re-emit
+          // onCallConnected (it resets the Dart call's start time / duration).
+          if (!wasConnected) {
+            wasConnected = true
+            val from = ci.remoteUri; val to = ci.localUri
+            val vid = videoActive
+            onMain {
+              serviceListener?.onRingerState(false)
+              serviceListener?.onCallConnected(id, from, to, vid)
+              modelListener?.onCallConnected(id, from, to, vid)
+            }
           }
         }
         pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED -> {

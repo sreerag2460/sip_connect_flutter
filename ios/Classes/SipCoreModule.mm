@@ -84,6 +84,7 @@ struct CoreCall : public Call {
     bool remoteHold = false;
     bool muted = false;
     bool videoActive = false;
+    bool wasConnected = false;
     CoreCall(Engine *e, Account &acc, int callId = PJSUA_INVALID_ID)
         : Call(acc, callId), eng(e) {}
     int holdStateValue() const {
@@ -246,17 +247,28 @@ void CoreCall::onCallState(OnCallStateParam &prm) {
     NSInteger callId = wireId;
     switch (ci.state) {
     case PJSIP_INV_STATE_EARLY: {
-        NSString *response = str(std::to_string(ci.lastStatusCode) + " " + ci.lastReason);
-        emitOn(eng, ^(SCDelegate d) { [d onCallProceeding:callId response:response]; });
+        // 'Proceeding' is an OUTGOING-call state (a 1xx response came back). On
+        // an incoming call, EARLY is us sending 180 Ringing — firing it would
+        // clobber the Dart 'ringing' state and break the incoming UI.
+        if (ci.role == PJSIP_ROLE_UAC) {
+            NSString *response = str(std::to_string(ci.lastStatusCode) + " " + ci.lastReason);
+            emitOn(eng, ^(SCDelegate d) { [d onCallProceeding:callId response:response]; });
+        }
         break;
     }
     case PJSIP_INV_STATE_CONFIRMED: {
-        NSString *from = str(ci.remoteUri), *to = str(ci.localUri);
-        BOOL vid = videoActive;
-        emitOn(eng, ^(SCDelegate d) {
-            [d onRingerState:NO];
-            [d onCallConnected:callId hdrFrom:from hdrTo:to withVideo:vid];
-        });
+        // Fire 'connected' only on the first CONFIRMED. A later re-INVITE /
+        // session refresh keeps the call CONFIRMED and must not re-emit
+        // onCallConnected (it resets the Dart call's start time / duration).
+        if (!wasConnected) {
+            wasConnected = true;
+            NSString *from = str(ci.remoteUri), *to = str(ci.localUri);
+            BOOL vid = videoActive;
+            emitOn(eng, ^(SCDelegate d) {
+                [d onRingerState:NO];
+                [d onCallConnected:callId hdrFrom:from hdrTo:to withVideo:vid];
+            });
+        }
         break;
     }
     case PJSIP_INV_STATE_DISCONNECTED: {
