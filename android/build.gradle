@@ -42,6 +42,9 @@ android {
 
     defaultConfig {
         minSdkVersion 21
+        // Ships R8/ProGuard keep rules to the consuming app so release builds
+        // don't strip the JNI-facing PJSIP (pjsua2) classes. See consumer-rules.pro.
+        consumerProguardFiles 'consumer-rules.pro'
     }
 }
 
