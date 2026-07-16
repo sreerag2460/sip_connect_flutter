@@ -66,8 +66,9 @@ build_openssl () {
   )
 }
 
-# 2) Drop in our build config.
+# 2) Drop in our build config + apply source patches.
 cp "$HERE/config_site.h" "$SRC/pjlib/include/pj/config_site.h"
+"$HERE/apply-patches.sh" "$SRC"
 
 for ABI in "${ABIS[@]}"; do
   if [ -f "$JNILIBS/$ABI/libpjsua2.so" ]; then

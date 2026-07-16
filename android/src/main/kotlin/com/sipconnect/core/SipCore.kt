@@ -37,6 +37,9 @@ import org.pjsip.pjsua2.OnInstantMessageStatusParam
 import org.pjsip.pjsua2.OnRegStateParam
 import org.pjsip.pjsua2.SendInstantMessageParam
 import org.pjsip.pjsua2.SipHeader
+import org.pjsip.pjsua2.SrtpOpt
+import org.pjsip.pjsua2.IntVector
+import org.pjsip.pjsua2.pjmedia_srtp_keying_method
 import org.pjsip.pjsua2.ToneDigit
 import org.pjsip.pjsua2.ToneDigitVector
 import org.pjsip.pjsua2.ToneGenerator
@@ -128,12 +131,15 @@ class SipCore(private val appContext: Context) {
   private var modelListener: ISipModelListener? = null
   private var serviceListener: ISipServiceListener? = null
 
-  private val accounts = LinkedHashMap<Int, PjAccount>()      // wire accId -> account
-  private val calls = LinkedHashMap<Int, PjCall>()            // wire callId (=pjsua id) -> call
-  private val players = LinkedHashMap<Int, PjPlayer>()        // wire playerId -> player
-  private val recorders = LinkedHashMap<Int, AudioMediaRecorder>() // callId -> recorder
-  private val buddies = LinkedHashMap<Int, PjBuddy>()         // wire subscrId -> buddy
-  private val renderers = LinkedHashMap<Int, IVideoRenderer>()// callId -> renderer
+  // Thread-safe: mutated from both PJSIP callback threads (director callbacks
+  // like onCallState/onIncomingCall) and the worker thread (exec{} handlers).
+  // Plain HashMaps here would race and corrupt under concurrent modification.
+  private val accounts = java.util.concurrent.ConcurrentHashMap<Int, PjAccount>()      // wire accId -> account
+  private val calls = java.util.concurrent.ConcurrentHashMap<Int, PjCall>()            // wire callId -> call
+  private val players = java.util.concurrent.ConcurrentHashMap<Int, PjPlayer>()        // wire playerId -> player
+  private val recorders = java.util.concurrent.ConcurrentHashMap<Int, AudioMediaRecorder>() // callId -> recorder
+  private val buddies = java.util.concurrent.ConcurrentHashMap<Int, PjBuddy>()         // wire subscrId -> buddy
+  private val renderers = java.util.concurrent.ConcurrentHashMap<Int, IVideoRenderer>()// callId -> renderer
   private var nextAccId = 1
   private var nextPlayerId = 1
   private var nextSubscrId = 1
@@ -233,6 +239,14 @@ class SipCore(private val appContext: Context) {
       }
 
       endpoint.libStart()
+      // This whole block — and every later exec{} / workerHandler.post{} — runs
+      // on the single SipCoreWorker thread, which drives pjsua2 API calls and
+      // the deferred Call.delete(). pjsua2 requires such external threads to be
+      // registered; calling into the library from an unregistered thread is
+      // undefined behavior and can corrupt internal state (later surfacing as a
+      // crash in an unrelated pjsip callback). Register once here.
+      try { endpoint.libRegisterThread("SipCoreWorker") }
+      catch (t: Throwable) { Log.w(TAG, "libRegisterThread: $t") }
       ep = endpoint
       isInitialized = true
     }
@@ -381,15 +395,35 @@ class SipCore(private val appContext: Context) {
     // enabling SIP/media STUN use when configured (server set at init in P5).
 
     // Media encryption. When the app doesn't specify it, default by transport:
-    // a TLS-signaling account almost always requires SRTP (providers reject a
-    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation
-    // — matching the prior engine's behavior. An explicit choice (incl.
-    // Disabled) is always honored. SRTP: 0=disabled, 2=mandatory (SDES/SAVP).
+    // a TLS-signaling account usually expects SRTP (providers reject a plain-RTP
+    // offer with 488), so enable it. An explicit choice (incl. Disabled) is honored.
+    //
+    // srtpUse OPTIONAL (1), not MANDATORY (2): OPTIONAL still offers SRTP on
+    // outgoing calls, but ACCEPTS a plain-RTP *incoming* call instead of failing
+    // media init with PJMEDIA_SRTP_ESDPINTRANSPORT. Mandatory left mismatched
+    // incoming calls half-initialized; a retransmitted INVITE then re-entered
+    // pjsua_call_on_incoming on the corrupt slot and crashed (SIGSEGV).
     val secure = a.secureMedia
       ?: if (a.transport == AccData.SipTransport.Tls) AccData.SecureMediaMode.SdesSrtp
          else AccData.SecureMediaMode.Disabled
-    cfg.mediaConfig.srtpUse = if (secure == AccData.SecureMediaMode.Disabled) 0 else 2
+    cfg.mediaConfig.srtpUse = if (secure == AccData.SecureMediaMode.Disabled) 0 else 1
+    // Offer crypto on outgoing even over a non-TLS-secured SDP so SRTP-requiring
+    // servers still accept the offer.
     cfg.mediaConfig.srtpSecureSignaling = 0
+    if (secure != AccData.SecureMediaMode.Disabled) {
+      // Enable BOTH SDES (a=crypto, RTP/SAVP) and DTLS-SRTP (UDP/TLS/RTP/SAVP)
+      // keying. Providers may send either; our outgoing uses SDES, but this
+      // provider offers DTLS-SRTP on *incoming* calls. Without DTLS keying,
+      // pjsip failed the incoming media transport (PJMEDIA_SRTP_ESDPINTRANSPORT)
+      // and then crashed in pjsua_call_on_incoming. Both keyings are compiled
+      // into the engine (OpenSSL DTLS present).
+      val srtpOpt = SrtpOpt()
+      val keyings = IntVector()
+      keyings.add(pjmedia_srtp_keying_method.PJMEDIA_SRTP_KEYING_SDES)
+      keyings.add(pjmedia_srtp_keying_method.PJMEDIA_SRTP_KEYING_DTLS_SRTP)
+      srtpOpt.keyings = keyings
+      cfg.mediaConfig.srtpOpt = srtpOpt
+    }
 
     cfg.videoConfig.autoShowIncoming = true
     cfg.videoConfig.autoTransmitOutgoing = a.upgradeToVideo == AccData.UpgradeToVideoMode.SendRecv

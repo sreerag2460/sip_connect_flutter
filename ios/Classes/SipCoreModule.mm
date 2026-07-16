@@ -596,12 +596,25 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
 
     // Media encryption. When the app doesn't specify it, default by transport:
     // a TLS-signaling account almost always requires SRTP (providers reject a
-    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation
-    // — matching the prior engine's behavior. An explicit choice (incl.
-    // Disabled) is always honored.
+    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation.
+    // An explicit choice (incl. Disabled) is always honored.
+    // OPTIONAL (not MANDATORY): still offers SRTP on outgoing calls, but accepts
+    // a plain-RTP *incoming* call instead of failing media init with
+    // PJMEDIA_SRTP_ESDPINTRANSPORT — mandatory left mismatched incoming calls
+    // half-initialized and a retransmitted INVITE then crashed pjsua_call_on_incoming.
     int secure = a.secureMedia ? a.secureMedia.intValue
                : (a.transport == SipTransportTls ? SecureMediaSdesSrtp : SecureMediaDisabled);
-    cfg.mediaConfig.srtpUse = (secure == SecureMediaDisabled) ? PJMEDIA_SRTP_DISABLED : PJMEDIA_SRTP_MANDATORY;
+    cfg.mediaConfig.srtpUse = (secure == SecureMediaDisabled) ? PJMEDIA_SRTP_DISABLED : PJMEDIA_SRTP_OPTIONAL;
+    if (secure != SecureMediaDisabled) {
+        // Enable BOTH SDES (a=crypto, RTP/SAVP) and DTLS-SRTP (UDP/TLS/RTP/SAVP)
+        // keying. Providers may send either; our outgoing uses SDES, but this
+        // provider offers DTLS-SRTP on *incoming* calls. Without DTLS keying,
+        // pjsip failed the incoming media transport (PJMEDIA_SRTP_ESDPINTRANSPORT)
+        // and then crashed in pjsua_call_on_incoming. Both keyings are compiled in.
+        cfg.mediaConfig.srtpOpt.keyings.clear();
+        cfg.mediaConfig.srtpOpt.keyings.push_back(PJMEDIA_SRTP_KEYING_SDES);
+        cfg.mediaConfig.srtpOpt.keyings.push_back(PJMEDIA_SRTP_KEYING_DTLS_SRTP);
+    }
     cfg.mediaConfig.srtpSecureSignaling = 0;
 
     cfg.videoConfig.autoShowIncoming = true;

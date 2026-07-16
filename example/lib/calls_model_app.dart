@@ -1,6 +1,7 @@
 // ignore_for_file: non_constant_identifier_names
 
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:sip_connect_flutter/calls_model.dart';
@@ -13,33 +14,37 @@ class CallMatcher {
 
   ///Id assigned by CallKit when push notification received
   String callkit_CallUUID;
+
   ///Some data received in push payload (put by remote SIP server)
   ///This field is using to identify/match push and SIP calls
   /// each aplication may use its own way
   String push_Hint;
+
   ///Id assigned by library when SIP INVITE received
-  int    sip_CallId;
+  int sip_CallId;
+
   ///Timestamp when this item has been created
   DateTime timestamp = DateTime.now();
 
-  CallMatcher(this.callkit_CallUUID, this.push_Hint, [this.sip_CallId=0]);
+  CallMatcher(this.callkit_CallUUID, this.push_Hint, [this.sip_CallId = 0]);
 }
-
 
 /// Calls list model (contains app level code of managing calls)
 /// Copy this class into own app and redesign as you need
 class AppCallsModel extends CallsModel {
-  AppCallsModel(IAccountsModel accounts, [this._logs, CdrsModel? cdrs]) :
-    super(accounts, _logs, cdrs);
+  AppCallsModel(IAccountsModel accounts, [this._logs, CdrsModel? cdrs])
+      : super(accounts, _logs, cdrs);
 
   final ILogsModel? _logs;
-  final List<CallMatcher> _callMatchers=[];//iOS PushKit specific impl
+  final List<CallMatcher> _callMatchers = []; //iOS PushKit specific impl
   Timer? _pushNotifTimer;
 
-   /// Handle iOS Pushkit notification received by library (parse payload, update CallKit window, store data from push payload)
+  /// Handle iOS Pushkit notification received by library (parse payload, update CallKit window, store data from push payload)
   @override
-  void onIncomingPush(String callkit_CallUUID, Map<String, dynamic> pushPayload) {
-    _logs?.print('onIncomingPush callkit_CallUUID:$callkit_CallUUID $pushPayload');
+  void onIncomingPush(
+      String callkit_CallUUID, Map<String, dynamic> pushPayload) {
+    _logs?.print(
+        'onIncomingPush callkit_CallUUID:$callkit_CallUUID $pushPayload');
     //Get data from 'pushPayload', which contains app specific details
     Map<String, dynamic>? apsPayload;
     try {
@@ -49,48 +54,52 @@ class AppCallsModel extends CallsModel {
     }
 
     String pushHint = apsPayload?["pushHint"] ?? CallMatcher.kStubPushHint;
-    String genericHandle =  apsPayload?["callerNumber"] ?? "genericHandle";
+    String genericHandle = apsPayload?["callerNumber"] ?? "genericHandle";
     String localizedCallerName = apsPayload?["callerName"] ?? "callerName";
     bool withVideo = apsPayload?["withVideo"] ?? false;
     int? sipCallId = null;
 
     int index = _callMatchers.indexWhere((c) => c.push_Hint == pushHint);
-    if(index!=-1) {
+    if (index != -1) {
       //Case: SIP already received
       sipCallId = _callMatchers[index].sip_CallId;
-    }
-    else {
+    } else {
       //Case: SIP hasn't received yet
       _callMatchers.add(CallMatcher(callkit_CallUUID, pushHint));
     }
 
     //Update CallKit
-    SipConnectFlutter().updateCallKitCallDetails(callkit_CallUUID, sipCallId, localizedCallerName, genericHandle, withVideo);
+    SipConnectFlutter().updateCallKitCallDetails(callkit_CallUUID, sipCallId,
+        localizedCallerName, genericHandle, withVideo);
 
     //Start timer which cleanups CallKit calls when SIP not received
     _startPushNotifTimer();
   }
 
   @override
-  void onIncomingSip(int callId, int accId, bool withVideo, String hdrFrom, String hdrTo) async {
+  void onIncomingSip(int callId, int accId, bool withVideo, String hdrFrom,
+      String hdrTo) async {
     super.onIncomingSip(callId, accId, withVideo, hdrFrom, hdrTo);
 
-    if(Platform.isIOS) {
+    if (Platform.isIOS) {
       //TODO Match push and sip calls using just received SIP INVITE and data from push (put to '_callMatchers')
       //Get some hint from just received SIP INVITE (added by remote server) or math this SIP-call with CallKit-call
-      String pushHint = await SipConnectFlutter().getSipHeader(callId, "X-PushHint")?? CallMatcher.kStubPushHint;
+      String pushHint =
+          await SipConnectFlutter().getSipHeader(callId, "X-PushHint") ??
+              CallMatcher.kStubPushHint;
       _logs?.print('onIncomingSip callId:$callId pushHint:$pushHint');
 
       //Searchs is there CallKit call which matches this one
       int index = _callMatchers.indexWhere((c) => c.push_Hint == pushHint);
-      if(index != -1) {
-        _logs?.print('onIncomingSip match call:${_callMatchers[index].callkit_CallUUID} <=> $callId');
+      if (index != -1) {
+        _logs?.print(
+            'onIncomingSip match call:${_callMatchers[index].callkit_CallUUID} <=> $callId');
 
         //Update CallKit with 'callId'
         _callMatchers[index].sip_CallId = callId;
-        SipConnectFlutter().updateCallKitCallDetails(_callMatchers[index].callkit_CallUUID, callId, null, null, null);
-      }
-      else {
+        SipConnectFlutter().updateCallKitCallDetails(
+            _callMatchers[index].callkit_CallUUID, callId, null, null, null);
+      } else {
         //Case - there is no CallKit call (push notif hasn't received yet)
         _callMatchers.add(CallMatcher("", pushHint, callId));
       }
@@ -98,36 +107,43 @@ class AppCallsModel extends CallsModel {
   }
 
   @override
+  void onProceeding(int callId, String response) {
+    log('onProceeding callId:$callId response:$response');
+  }
+
+  @override
   void onTerminated(int callId, int statusCode) {
     super.onTerminated(callId, statusCode);
 
-    if(Platform.isIOS) {
-      int index =_callMatchers.indexWhere((c) => c.sip_CallId==callId);
-      if(index != -1) {
-        _logs?.print('onTerminated removed call:${_callMatchers[index].callkit_CallUUID}');
+    if (Platform.isIOS) {
+      int index = _callMatchers.indexWhere((c) => c.sip_CallId == callId);
+      if (index != -1) {
+        _logs?.print(
+            'onTerminated removed call:${_callMatchers[index].callkit_CallUUID}');
         _callMatchers.removeAt(index);
       }
     }
   }
 
   void _startPushNotifTimer() {
-    if(_pushNotifTimer != null) return;
+    if (_pushNotifTimer != null) return;
 
     const Duration kTimerDelay = Duration(seconds: 1);
     const Duration kEndCallDelay = Duration(seconds: 15);
 
     _pushNotifTimer = Timer.periodic(kTimerDelay, (Timer timer) {
       DateTime now = DateTime.now();
-      for(int i = _callMatchers.length-1; i>=0; --i) {
+      for (int i = _callMatchers.length - 1; i >= 0; --i) {
         //End CallKit call when SIP INVITE hasn't received during kEndCallDelay
         CallMatcher cm = _callMatchers[i];
-        if((cm.sip_CallId==0) && now.difference(cm.timestamp) > kEndCallDelay) {
+        if ((cm.sip_CallId == 0) &&
+            now.difference(cm.timestamp) > kEndCallDelay) {
           SipConnectFlutter().endCallKitCall(cm.callkit_CallUUID);
           _callMatchers.removeAt(i);
         }
       }
 
-      if(_callMatchers.isEmpty) {
+      if (_callMatchers.isEmpty) {
         _pushNotifTimer?.cancel();
         _pushNotifTimer = null;
       }

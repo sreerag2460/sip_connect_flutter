@@ -34,6 +34,7 @@ if [ ! -d "$SSL_SRC" ]; then
     | tar -xz -C "$WORK"
 fi
 cp "$HERE/config_site.h" "$SRC/pjlib/include/pj/config_site.h"
+"$HERE/apply-patches.sh" "$SRC"
 
 # Static OpenSSL per slice (for PJSIP TLS transport + DTLS-SRTP).
 # $1=openssl-target  $2=slice-tag  $3=min-version-flag

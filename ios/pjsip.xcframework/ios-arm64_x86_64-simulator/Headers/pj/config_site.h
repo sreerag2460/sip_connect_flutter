@@ -41,6 +41,12 @@
 #define PJMEDIA_HAS_SRTP                     1
 #define PJSIP_HAS_TLS_TRANSPORT              1
 #define PJ_HAS_SSL_SOCK                      1
+/* DTLS-SRTP keying (m=... UDP/TLS/RTP/SAVP). OFF by default upstream; some
+ * providers offer ONLY DTLS-SRTP on incoming calls, which the engine would
+ * otherwise reject with PJMEDIA_SRTP_ESDPINTRANSPORT (call fails as a "missed
+ * call"). Uses the OpenSSL DTLS we already link. Keyings are selected per
+ * account in SipCore (SDES + DTLS). */
+#define PJMEDIA_SRTP_HAS_DTLS                1
 
 /* --- ICE / STUN / TURN --------------------------------------------------- */
 #define PJNATH_HAS_STUN                      1
