@@ -380,11 +380,15 @@ class SipCore(private val appContext: Context) {
     // Note: pjsua2 STUN is endpoint-level; per-account stunServer is applied by
     // enabling SIP/media STUN use when configured (server set at init in P5).
 
-    // SRTP: 0=disabled 1=optional 2=mandatory ; SDES-only until OpenSSL lands (P5).
-    cfg.mediaConfig.srtpUse = when (a.secureMedia) {
-      AccData.SecureMediaMode.Disabled -> 0
-      else -> 2
-    }
+    // Media encryption. When the app doesn't specify it, default by transport:
+    // a TLS-signaling account almost always requires SRTP (providers reject a
+    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation
+    // — matching the prior engine's behavior. An explicit choice (incl.
+    // Disabled) is always honored. SRTP: 0=disabled, 2=mandatory (SDES/SAVP).
+    val secure = a.secureMedia
+      ?: if (a.transport == AccData.SipTransport.Tls) AccData.SecureMediaMode.SdesSrtp
+         else AccData.SecureMediaMode.Disabled
+    cfg.mediaConfig.srtpUse = if (secure == AccData.SecureMediaMode.Disabled) 0 else 2
     cfg.mediaConfig.srtpSecureSignaling = 0
 
     cfg.videoConfig.autoShowIncoming = true

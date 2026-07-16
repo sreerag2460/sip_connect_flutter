@@ -594,9 +594,14 @@ static AccountConfig buildAccountConfig(SipCoreAccData *a) {
         cfg.natConfig.turnPassword = cpp(a.turnPassword);
     }
 
-    // SRTP: SDES-only until the OpenSSL build lands (P5).
-    int secure = a.secureMedia ? a.secureMedia.intValue : 0;
-    cfg.mediaConfig.srtpUse = (secure == 0) ? PJMEDIA_SRTP_DISABLED : PJMEDIA_SRTP_MANDATORY;
+    // Media encryption. When the app doesn't specify it, default by transport:
+    // a TLS-signaling account almost always requires SRTP (providers reject a
+    // plain-RTP offer with 488 Not Acceptable Here), so mirror that expectation
+    // — matching the prior engine's behavior. An explicit choice (incl.
+    // Disabled) is always honored.
+    int secure = a.secureMedia ? a.secureMedia.intValue
+               : (a.transport == SipTransportTls ? SecureMediaSdesSrtp : SecureMediaDisabled);
+    cfg.mediaConfig.srtpUse = (secure == SecureMediaDisabled) ? PJMEDIA_SRTP_DISABLED : PJMEDIA_SRTP_MANDATORY;
     cfg.mediaConfig.srtpSecureSignaling = 0;
 
     cfg.videoConfig.autoShowIncoming = true;

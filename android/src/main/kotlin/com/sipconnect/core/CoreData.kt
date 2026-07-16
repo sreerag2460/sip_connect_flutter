@@ -129,7 +129,9 @@ class AccData {
   @JvmField var rewriteContactIp: Boolean = true; fun setRewriteContactIp(v: Boolean) { rewriteContactIp = v }
   @JvmField var verifyIncomingCall: Boolean = false; fun setVerifyIncomingCall(v: Boolean) { verifyIncomingCall = v }
   @JvmField var forceSipProxy: Boolean = false;   fun setForceSipProxy(v: Boolean) { forceSipProxy = v }
-  @JvmField var secureMedia: SecureMediaMode = SecureMediaMode.Disabled; fun setSecureMediaMode(v: SecureMediaMode) { secureMedia = v }
+  // null = not specified by the app (engine defaults it by transport); a set
+  // value (including Disabled) is an explicit choice and is honored as-is.
+  @JvmField var secureMedia: SecureMediaMode? = null; fun setSecureMediaMode(v: SecureMediaMode) { secureMedia = v }
   @JvmField var upgradeToVideo: UpgradeToVideoMode = UpgradeToVideoMode.RecvOnly; fun setUpgradeToVideoMode(v: UpgradeToVideoMode) { upgradeToVideo = v }
   @JvmField var stunServer: String? = null;    fun setStunServer(v: String) { stunServer = v }
   @JvmField var turnServer: String? = null;    fun setTurnServer(v: String) { turnServer = v }
