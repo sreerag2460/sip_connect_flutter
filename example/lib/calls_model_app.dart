@@ -112,6 +112,13 @@ class AppCallsModel extends CallsModel {
   }
 
   @override
+  void onConnected(int callId, String from, String to, bool withVideo) {
+    // TODO: implement onConnected
+    super.onConnected(callId, from, to, withVideo);
+    log('onConnected callId:$callId from:$from to:$to withVideo:$withVideo');
+  }
+
+  @override
   void onTerminated(int callId, int statusCode) {
     super.onTerminated(callId, statusCode);
 
