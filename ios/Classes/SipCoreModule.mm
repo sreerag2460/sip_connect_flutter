@@ -85,12 +85,14 @@ struct CoreCall : public Call {
     bool muted = false;
     bool videoActive = false;
     bool wasConnected = false;
+    bool proceedingFired = false;
     CoreCall(Engine *e, Account &acc, int callId = PJSUA_INVALID_ID)
         : Call(acc, callId), eng(e) {}
     int holdStateValue() const {
         return (localHold ? 1 : 0) | (remoteHold ? 2 : 0);
     }
     void onCallState(OnCallStateParam &prm) override;
+    void onCallTsxState(OnCallTsxStateParam &prm) override;
     void onCallMediaState(OnCallMediaStateParam &prm) override;
     void onDtmfDigit(OnDtmfDigitParam &prm) override;
     void onCallTransferStatus(OnCallTransferStatusParam &prm) override;
@@ -250,7 +252,10 @@ void CoreCall::onCallState(OnCallStateParam &prm) {
         // 'Proceeding' is an OUTGOING-call state (a 1xx response came back). On
         // an incoming call, EARLY is us sending 180 Ringing — firing it would
         // clobber the Dart 'ringing' state and break the incoming UI.
-        if (ci.role == PJSIP_ROLE_UAC) {
+        // Normally onCallTsxState already fired proceeding on the earlier
+        // 100 Trying; this is the fallback when no 100 preceded the 180/183.
+        if (ci.role == PJSIP_ROLE_UAC && !proceedingFired) {
+            proceedingFired = true;
             NSString *response = str(std::to_string(ci.lastStatusCode) + " " + ci.lastReason);
             emitOn(eng, ^(SCDelegate d) { [d onCallProceeding:callId response:response]; });
         }
@@ -296,6 +301,27 @@ void CoreCall::onCallState(OnCallStateParam &prm) {
     }
     default: break;
     }
+}
+
+// Fire 'proceeding' as soon as the FIRST provisional (1xx) response arrives on
+// the outgoing INVITE — typically a '100 Trying' one round-trip after we send
+// the INVITE. Waiting for PJSIP_INV_STATE_EARLY instead delays it until a
+// 180/183 (an early dialog), which only comes once the far end actually rings —
+// that can be seconds later. 100 Trying is the true "Proceeding".
+void CoreCall::onCallTsxState(OnCallTsxStateParam &prm) {
+    if (proceedingFired) return;
+    CallInfo ci;
+    try { ci = getInfo(); } catch (Error &) { return; }
+    if (ci.role != PJSIP_ROLE_UAC) return;
+    if (prm.e.type != PJSIP_EVENT_TSX_STATE) return;
+    SipTransaction &tsx = prm.e.body.tsxState.tsx;
+    if (tsx.method != "INVITE") return;
+    int code = tsx.statusCode;
+    if (code < 100 || code >= 200) return;
+    proceedingFired = true;
+    NSInteger callId = wireId;
+    NSString *response = str(std::to_string(code) + " " + tsx.statusText);
+    emitOn(eng, ^(SCDelegate d) { [d onCallProceeding:callId response:response]; });
 }
 
 void CoreCall::onCallMediaState(OnCallMediaStateParam &prm) {

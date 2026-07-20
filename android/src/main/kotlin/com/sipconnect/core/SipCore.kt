@@ -29,6 +29,7 @@ import org.pjsip.pjsua2.EpConfig
 import org.pjsip.pjsua2.IpChangeParam
 import org.pjsip.pjsua2.OnCallMediaStateParam
 import org.pjsip.pjsua2.OnCallStateParam
+import org.pjsip.pjsua2.OnCallTsxStateParam
 import org.pjsip.pjsua2.OnCallTransferStatusParam
 import org.pjsip.pjsua2.OnDtmfDigitParam
 import org.pjsip.pjsua2.OnIncomingCallParam
@@ -515,6 +516,7 @@ class SipCore(private val appContext: Context) {
     var muted = false
     var videoActive = false
     var wasConnected = false
+    var proceedingFired = false
 
     private fun holdState(): HoldState = when {
       localHold && remoteHold -> HoldState.LocalAndRemote
@@ -532,7 +534,10 @@ class SipCore(private val appContext: Context) {
           // 'Proceeding' is an OUTGOING-call state (a 1xx response came back).
           // On an incoming call, EARLY is us sending 180 Ringing — firing it
           // would clobber the Dart 'ringing' state and break the incoming UI.
-          if (ci.role == pjsip_role_e.PJSIP_ROLE_UAC) {
+          // Normally onCallTsxState already fired proceeding on the earlier
+          // 100 Trying; this is the fallback when no 100 preceded the 180/183.
+          if (ci.role == pjsip_role_e.PJSIP_ROLE_UAC && !proceedingFired) {
+            proceedingFired = true
             val response = "${ci.lastStatusCode} ${ci.lastReason}"
             onMain { modelListener?.onCallProceeding(id, response) }
           }
@@ -576,6 +581,25 @@ class SipCore(private val appContext: Context) {
         }
         else -> {}
       }
+    }
+
+    // Fire 'proceeding' as soon as the FIRST provisional (1xx) response arrives
+    // on the outgoing INVITE — typically a '100 Trying' one round-trip after we
+    // send the INVITE. Waiting for PJSIP_INV_STATE_EARLY instead delays it until
+    // a 180/183 (an early dialog), which only comes once the far end actually
+    // rings — that can be seconds later. 100 Trying is the true "Proceeding".
+    override fun onCallTsxState(prm: OnCallTsxStateParam) {
+      if (proceedingFired) return
+      val ci = try { info } catch (t: Throwable) { return }
+      if (ci.role != pjsip_role_e.PJSIP_ROLE_UAC) return
+      val tsx = try { prm.e.body.tsxState.tsx } catch (t: Throwable) { return }
+      if (tsx.method != "INVITE") return
+      val code = tsx.statusCode
+      if (code < 100 || code >= 200) return
+      proceedingFired = true
+      val id = wireId
+      val response = "$code ${tsx.statusText}"
+      onMain { modelListener?.onCallProceeding(id, response) }
     }
 
     override fun onCallMediaState(prm: OnCallMediaStateParam) {
