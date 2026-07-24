@@ -6,8 +6,17 @@
  * (Opus is added at P3). Keep this file the single source of PJSIP build knobs.
  */
 
-/* Platform flag is set by the build script before including this file:
- *   Android -> PJ_CONFIG_ANDROID, iOS -> PJ_CONFIG_IPHONE.               */
+/* Platform flag: Android's configure-android exports PJ_CONFIG_ANDROID via
+ * CFLAGS, but iOS has no equivalent — configure-iphone expects config_site.h
+ * itself to define PJ_CONFIG_IPHONE (per the pjsip iOS build docs). Defining
+ * it here (not in build-script CFLAGS) keeps the static libs and the plugin
+ * sources (compiled against the copied headers in ios/pjsip-headers) on the
+ * same struct layouts. Without it the CoreAudio audio-device driver is
+ * compiled out entirely: zero audio devices, PJMEDIA_EAUD_NODEFDEV, no audio */
+#if defined(__APPLE__) && !defined(PJ_CONFIG_IPHONE)
+#  define PJ_CONFIG_IPHONE 1
+#endif
+
 #if defined(PJ_CONFIG_ANDROID) && PJ_CONFIG_ANDROID!=0
 #  include <pj/config_site_sample.h>
 #endif
