@@ -1,0 +1,86 @@
+# Auto-publish to pub.dev.
+#
+# Flow:
+#   1. Push to main that changes the `version:` in pubspec.yaml
+#      -> `tag` job creates tag v<version> and dispatches this workflow on that tag.
+#   2. Run on a v* tag (dispatched, or a tag you pushed manually)
+#      -> `publish` job analyzes, tests and publishes via OIDC (no secrets needed).
+#
+# One-time setup on pub.dev (package Admin tab -> Automated publishing):
+#   - Enable publishing from GitHub Actions
+#   - Repository: <owner>/<repo>
+#   - Tag pattern: v{{version}}
+#   - Enable "publishing from workflow_dispatch events"
+
+name: Publish to pub.dev
+
+on:
+  push:
+    branches: [main]
+    paths: [pubspec.yaml]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create tag for new version
+        id: version
+        run: |
+          VERSION=$(grep -E '^version:' pubspec.yaml | awk '{print $2}' | tr -d "'\"")
+          TAG="v$VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists, nothing to publish."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Tags pushed with GITHUB_TOKEN don't trigger workflows,
+      # but workflow_dispatch does, so start the publish run explicitly.
+      - name: Trigger publish on the tag
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish.yml --ref "${{ steps.version.outputs.tag }}"
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for pub.dev OIDC authentication
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1 # sets up the pub.dev OIDC token
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos lib
+
+      - name: Test
+        run: if [ -d test ]; then flutter test; fi
+
+      - name: Dry run
+        run: flutter pub publish --dry-run
+
+      - name: Publish
+        run: flutter pub publish --force
